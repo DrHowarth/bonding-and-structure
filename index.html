@@ -74,6 +74,7 @@
   #ctlReset[hidden]{display:none}
   #why{flex:none}
   #dial{display:block;width:124px;height:124px;margin:0 auto;touch-action:none;cursor:grab}
+  .ctlPart{display:flex;flex-direction:column;gap:8px;min-width:0}
   #dial:focus-visible{outline:2px solid #fff;outline-radius:50%}
   #dial text{fill:var(--ink);font:600 16px -apple-system,BlinkMacSystemFont,sans-serif;font-variant-numeric:tabular-nums}
   #dial .st{fill:#c6cedb;font-size:13px;font-weight:400}
@@ -202,6 +203,9 @@
     #ctlBody{flex:1 1 auto;min-width:0}
     body.tool-heat #ctlBody{display:flex;align-items:center;gap:18px}
     body.tool-heat #dial{margin:0}
+    body.tool-circuit #ctlBody{display:flex;align-items:center;gap:18px}
+    body.tool-circuit .ctlPart:first-child{flex:1 1 auto}
+    body.tool-circuit #dial{margin:0}
     #chrome #why{width:110px;min-height:56px}
     body.questions #chrome{bottom:auto;grid-template-columns:1fr auto 72px;grid-template-rows:auto;grid-template-areas:". home corner"}
     #gearPop{right:8px;top:76px}
@@ -370,7 +374,7 @@
      run-tests.js, which extracts this block by its id.
      =================================================================== -->
 <script id="layer1-chemistry">
-const BUILD_STAMP = 'bsr-s6-compare';
+const BUILD_STAMP = 'bsr-s8-gas-space';
 // One electron size for the whole app (B11): the sea, C₆₀'s ball electrons and
 // the wire electrons are all drawn this radius / pm, whatever the substance.
 // The smallest ion is Mg²⁺ at 72 pm, so an electron is about a third of it.
@@ -416,7 +420,7 @@ const ION_RADIUS_PM = {
 // the gaps instead of replacing iron.
 // Atoms in a covalent network (S4) or a molecule (S5) are drawn at their
 // covalent radius too.
-const ATOM_RADIUS_PM = { H: 32, C: 77, N: 71, O: 66, Si: 111, P: 107, S: 105, Cl: 99, Br: 114, I: 133 };
+const ATOM_RADIUS_PM = { H: 32, C: 77, N: 71, O: 66, F: 71, Si: 111, P: 107, S: 105, Cl: 99, Br: 114, I: 133 };   // F: half the F–F bond (S8, an electrolysis product)
 // Outer-shell electrons. An atom with more outer electrons than covalent
 // bonds has the rest delocalised (graphite, graphene, C₆₀: 4 − 3 = 1).
 const OUTER_ELECTRONS = { C: 4, Si: 4, O: 6 };
@@ -483,8 +487,31 @@ const MOLECULE_SHAPES = {
 };
 // Relative atomic masses (as on the IGCSE Periodic Table), to turn a mass %
 // into a number of atoms.
-const RELATIVE_ATOMIC_MASS = { C: 12, Fe: 56 };
+const RELATIVE_ATOMIC_MASS = { C: 12, Fe: 56, Li: 7, Na: 23, K: 39, Mg: 24, Ca: 40, O: 16, F: 19, Cl: 35.5, Br: 80, I: 127 };   // the S8 electrolysis's elements too
 
+// ---------------------------------------------------------------------------
+// The electrolysis of a melt (S8 session 3): data for its products. Each value with its source.
+// ---------------------------------------------------------------------------
+// The molten salt at its melting point (mpC below) / g cm⁻³. The halides: ρ = a − bT from Janz et al.,
+// "Molten Salts: Volume 1", NSRDS-NBS 15 (1968), Table 176 (doi:10.6028/NBS.NSRDS.15). The oxides melt too
+// hot to have been measured pure: the molar volume of the liquid at its melting point from Courtial and
+// Dingwell, American Mineralogist 84, 465 (1999), Table 5 (CaO 24.339, MgO 13.983 cm³ mol⁻¹), extrapolated.
+const MELT_DENSITY = { LiF: 1.810, NaF: 1.971, NaCl: 1.556, KCl: 1.528, KBr: 2.127, NaI: 2.741, MgO: 2.882, CaO: 2.304 };
+// The liquid metal at its own melting point / g cm⁻³: CRC Handbook of Chemistry and Physics, "Density of
+// molten elements" (as quoted in each element's data, e.g. Wikipedia's infobox "when liquid, at m.p.").
+const LIQUID_METAL_DENSITY = { Li: 0.512, Na: 0.927, K: 0.829, Mg: 1.584, Ca: 1.378 };
+// The critical temperature of each non-metal element / °C: above it no pressure can make it a liquid.
+// CRC Handbook (Haynes, 2011), critical constants: F₂ 144.4 K, Cl₂ 416.9 K, Br₂ 588 K, I₂ 819 K, O₂ 154.6 K.
+const CRITICAL_T_C = { F: -129, Cl: 144, Br: 315, I: 546, O: -119 };
+// The bond in the X₂ molecules that are not models of their own / pm, and its order: F–F 141 pm and
+// O=O 121 pm (CRC Handbook, bond lengths in diatomic molecules). Cl₂, Br₂ and I₂ are in MOLECULE_SHAPES.
+const DIATOMIC_BOND = { F: { pm: 142, order: 1 }, O: { pm: 121, order: 2 } };
+function diatomicBond(el) {
+  const m = MOLECULE_SHAPES[el + '₂'];
+  if (!m) return DIATOMIC_BOND[el];
+  const a = m.atoms[0].p, b = m.atoms[1].p;
+  return { pm: Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), order: m.bonds[0][2] };
+}
 // Element pairs that sit next to each other in a model; each pair must stay
 // easy to tell apart (guarded in run-tests.js).
 const GEM_CONTRAST_PAIRS = [
@@ -623,6 +650,33 @@ function conductivity(s, state = 'solid') {
   else if (s.cls === 'giantCovalent') why = 'allElectronsInBonds';
   else why = 'neutralMolecules';
   return { conducts: false, carrier: null, why };
+}
+
+// The products of electrolysing a melt (S8 session 3), from data only, never from the substance. At the
+// cathode (−) each positive ion gains electrons (reduction) and becomes an atom of the metal, drawn as the
+// metal's own model draws it (half its spacing). At the anode (+) each negative ion loses electrons
+// (oxidation) and becomes an atom; two atoms join as a molecule. tC: the melt's temperature.
+// The non-metal: above its critical temperature it is a gas at any pressure, so it bubbles off.
+// The metal: a liquid past its melting point. The cell is kept at a raised pressure (decision C), so a
+// metal past its boiling point at 1 atm (aboveBp) still forms as a liquid. It floats if it is less dense
+// than the melt, and sinks if not.
+function electrolysisProducts(s, tC = s.mpC) {
+  const c = s.ions.cation, a = s.ions.anion, bond = diatomicBond(a.el), rhoMelt = MELT_DENSITY[s.key], rhoM = LIQUID_METAL_DENSITY[c.el];
+  const metal = SUBSTANCES.find(m => m.cls === 'metallic' && !m.interstitial && m.ions.cation.el === c.el);
+  return {
+    meltDensity: rhoMelt,
+    // the room one atom of liquid metal takes, as a share of one formula unit of the melt's: (Ar / ρ) of each
+    metalVolume: RELATIVE_ATOMIC_MASS[c.el] / rhoM / ((RELATIVE_ATOMIC_MASS[c.el] + RELATIVE_ATOMIC_MASS[a.el]) / rhoMelt),
+    cathode: { el: c.el, ion: ionLabel(c.el, c.charge), electrons: c.charge, rPm: metal.spacingPm / 2, state: tC >= metal.mpC ? 'liquid' : 'solid', aboveBp: tC >= metal.bpC, density: rhoM, floats: rhoM < rhoMelt },
+    anode: { el: a.el, ion: ionLabel(a.el, a.charge), electrons: -a.charge, formula: a.el + '₂', rPm: ATOM_RADIUS_PM[a.el], bondPm: bond.pm, order: bond.order, state: tC > CRITICAL_T_C[a.el] ? 'gas' : 'liquid' },
+  };
+}
+// The half-equations, from the charges: Na⁺ + e⁻ → Na, Mg²⁺ + 2e⁻ → Mg; 2Cl⁻ → Cl₂ + 2e⁻, 2O²⁻ → O₂ + 4e⁻.
+const SUB = { '2': '₂' };
+function halfEquations(s) {
+  const c = s.ions.cation, a = s.ions.anion, e = n => (n === 1 ? '' : n) + 'e⁻';
+  return { cathode: ionLabel(c.el, c.charge) + ' + ' + e(c.charge) + ' → ' + c.el,
+    anode: '2' + ionLabel(a.el, a.charge) + ' → ' + a.el + SUB['2'] + ' + ' + e(-2 * a.charge) };
 }
 
 // What must be overcome for the solid to melt (or turn to gas).
@@ -1162,6 +1216,28 @@ const BEAT_TEXT = {
   slowDrift: 'In a real wire the electrons move much faster at random; the current is a slow drift.',
   alloyStrain: 'The layers are held in place and cannot slide, so the strain builds up and the ions vibrate harder.',
 };
+// The Conductivity tool's "Why?" once the model has melted in its crucible (S8), from the rule's
+// answer for the liquid (conductivity), never from the substance. The app's own wording: particles
+// "can move" (never "free"), electrons are "delocalised". The ions' current comes with the
+// electrolysis (S8 session 3).
+function moltenCircuitText(s) {
+  const c = conductivity(s, 'liquid');
+  if (c.carrier === 'ions') {
+    const p = electrolysisProducts(s), h = halfEquations(s), metal = ELEMENTS[p.cathode.el].name, gas = ELEMENTS[p.anode.el].name;
+    return 'Once molten, the ions are no longer held in fixed positions in a lattice. The ions can move, so molten ' + s.name + ' conducts electricity.\n' +
+      'Positive ' + p.cathode.ion + ' ions move to the cathode (−). Reduction at the cathode: ' + h.cathode + '.\n' +
+      'Negative ' + p.anode.ion + ' ions move to the anode (+). Oxidation at the anode: ' + h.anode + '.\n' +
+      cap(gas) + ' is a gas at this temperature, so it bubbles off at the anode. Liquid ' + metal + ' is ' + (p.cathode.floats ? 'less' : 'more') + ' dense than the melt, so it ' + (p.cathode.floats ? 'floats' : 'sinks') + '.' +
+      (p.cathode.aboveBp ? ' At normal pressure ' + metal + ' boils below the melting point of ' + s.name + ': the cell is kept at a raised pressure, so it forms as a liquid.' : '');
+  }
+  if (c.carrier === 'electrons') return 'Once molten, the metal still has delocalised electrons. They can move through the liquid, so molten ' + s.name + ' conducts electricity.';
+  return 'Once molten, the molecules can move, but molecules have no overall charge. There are no ions or delocalised electrons that can move, so molten ' + s.name + ' does not conduct electricity.';
+}
+// Where the Conductivity tool's dial stops at the melting point (decision E), it says why.
+function dialStopText(s) {
+  return s.turnsToGas ? 'The dial stops here: at normal pressure ' + s.name + ' turns straight to gas instead of melting.'
+    : 'The dial stops at the melting point: this model does not show ' + s.name + ' as a liquid.';
+}
 
 // The word bank: every gap's answer and every distractor, in an order that is
 // mixed up but the same on every load (seeded by the passage).
@@ -1307,9 +1383,9 @@ function trendAnswer(t) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     TREND_BY, TREND_LABEL, TRENDS, TREND_BY_KEY, TREND_WHY, trendValue, trendOrder, trendDisplay, trendsFor, trendLabel, trendTask, checkOrder, trendDirection, trendNote, trendAnswer,
-    BUILD_STAMP, keyEntries, ELECTRON_R_PM, ELEMENTS, ELECTRON_GEM, ION_RADIUS_PM, ATOM_RADIUS_PM, OUTER_ELECTRONS, VALENCE, MOLECULE_SHAPES, RELATIVE_ATOMIC_MASS, interstitialPerMetalAtom, GEM_CONTRAST_PAIRS, SUBSTANCES, BY_KEY, CLASS_LABEL,
+    BUILD_STAMP, keyEntries, ELECTRON_R_PM, MELT_DENSITY, LIQUID_METAL_DENSITY, CRITICAL_T_C, DIATOMIC_BOND, diatomicBond, electrolysisProducts, halfEquations, ELEMENTS, ELECTRON_GEM, ION_RADIUS_PM, ATOM_RADIUS_PM, OUTER_ELECTRONS, VALENCE, MOLECULE_SHAPES, RELATIVE_ATOMIC_MASS, interstitialPerMetalAtom, GEM_CONTRAST_PAIRS, SUBSTANCES, BY_KEY, CLASS_LABEL,
     DELOC_SPAN, MP_HIGH_C, HIGH_CARBON_PCT, LINDEMANN, HARDNESS_PILLS, BANK_DISTRACTORS, PRESS_FORCE, STEPS, CONTENT,
-    conductivity, whatBreaksOnMelting, meltingBand, hardnessOutcome,
+    conductivity, whatBreaksOnMelting, meltingBand, hardnessOutcome, moltenCircuitText, dialStopText,
     vibrationFraction, vibrationAmplitudePm, meltThresholdPm,
     buildContent, elementsIn, ionLabel, fmtC,
     STEP_TITLE, stepQuestion, GAP_WRONG_PLACE, BEAT_TEXT, wordBank, checkPill, checkGapFill,
@@ -1392,7 +1468,7 @@ function buildMetal(s, n) {
   const c = ['x', 'y', 'z'].map(a => sites.reduce((t, p) => t + p[a], 0) / sites.length);
   for (const p of sites) { p.x -= c[0]; p.y -= c[1]; p.z -= c[2]; }
   const lattice = { kind: s.lattice, n, spacingPm: d, layerGapPm: net.gap * d, sites };
-  if (s.interstitial) addInterstitials(s, lattice);
+  if (s.interstitial) { addInterstitials(s, lattice); bulgeLattice(lattice); }
   return lattice;
 }
 // The small atoms of an alloy (D2), in the gaps between two layers. Their
@@ -1432,6 +1508,62 @@ function addInterstitials(s, lattice) {
   }
   for (const p of placed) sites.push(p);
 }
+// The steels' bulge (B33, S8 decision D). A carbon atom (77 pm) is far too
+// big for the gap it sits in: the two iron atoms either side of it are 143 pm
+// away, where they would need 124 + 77 = 201 pm. So each carbon atom pushes the
+// iron atoms round it apart, at rest: above, below and along the rows, fading
+// over about two atoms. The push on the nearest atoms is the misfit × BULGE_X;
+// real strain is a few per cent of a spacing (ARCHITECTURE.md §7). An atom
+// that fits its gap pushes nothing. It is built into the sites, so every view
+// shows it; p.bulge keeps each site's push, so p.x − p.bulge[0] … is its
+// lattice point.
+const BULGE_X = 1.5;          // the push is this × the misfit, so it can be seen
+const BULGE_W_D = 1.2;        // it fades over this range (× d): about two atoms each way
+const BULGE_CLEAR = 1.04;     // no iron atom ends nearer a small atom than this × the sum of their true radii
+const BULGE_NEAR_D = 0.8;     // … and no two iron atoms nearer than this × d
+// The push on a site at v (pm) from a small atom, added × w to out. amp: the
+// push at the nearest lattice point, rNear (pm) away.
+function bulgePm(B, v, w, out) {
+  const r = Math.hypot(v[0], v[1], v[2]);
+  if (!r) return;
+  const k = w * B.amp * Math.exp((B.rNear * B.rNear - r * r) / (B.w * B.w)) / r;
+  out[0] += k * v[0]; out[1] += k * v[1]; out[2] += k * v[2];
+}
+function bulgeOf(lattice, c) {
+  const d = lattice.spacingPm, host = lattice.sites.filter(p => p.role !== 'interstitial');
+  const rNear = Math.min(...host.map(p => siteDistancePm(p, c))), misfit = Math.max(0, host[0].rPm + c.rPm - rNear);
+  return { amp: BULGE_X * misfit, rNear, w: BULGE_W_D * d, need: BULGE_CLEAR * (host[0].rPm + c.rPm) };
+}
+function bulgeLattice(lattice) {
+  const sites = lattice.sites, d = lattice.spacingPm, small = sites.filter(p => p.role === 'interstitial'), host = sites.filter(p => p.role !== 'interstitial');
+  const B = lattice.bulgeOf = small.map(c => bulgeOf(lattice, c)), v = [0, 0, 0];
+  const at = host.map(p => { const o = [0, 0, 0]; small.forEach((c, k) => { v[0] = p.x - c.x; v[1] = p.y - c.y; v[2] = p.z - c.z; bulgePm(B[k], v, 1, o); }); return [p.x + o[0], p.y + o[1], p.z + o[2]]; });
+  // The strain spreads, as in a crystal: no two iron atoms are squeezed nearer than BULGE_NEAR_D × d,
+  // and no iron atom is pushed into a small atom (where two pushes meet it could be pushed toward another).
+  const pairs = [];
+  for (let a = 0; a < host.length; a++) for (let b = a + 1; b < host.length; b++) if (siteDistancePm(host[a], host[b]) < 1.5 * d) pairs.push([a, b]);
+  const apart = (P, Q, need, share) => {
+    const e = [P[0] - Q[0], P[1] - Q[1], P[2] - Q[2]], r = Math.hypot(e[0], e[1], e[2]);
+    if (r >= need || !r) return false;
+    for (let x = 0; x < 3; x++) { P[x] += share * e[x] / r * (need - r); if (share < 1) Q[x] -= share * e[x] / r * (need - r); }
+    return true;
+  };
+  // The top and bottom layers stay flat in y and none is pushed past them: the electron sea bounces off
+  // those faces and counts an atom on a face once, and an atom just off it would be counted twice. (The
+  // front and back faces are left free: holding them would straighten the rows a pupil sees first.)
+  const ys = host.map(p => p.y), lo = Math.min(...ys), hi = Math.max(...ys), eps = 1e-6 * d;
+  const inBlock = () => host.forEach((p, a) => { at[a][1] = Math.abs(p.y - lo) < eps || Math.abs(p.y - hi) < eps ? p.y : clamp(at[a][1], lo, hi); });
+  inBlock();
+  for (let pass = 0, moved = true; pass < 40 && moved; pass++) {
+    moved = false;
+    for (const [a, b] of pairs) if (apart(at[a], at[b], BULGE_NEAR_D * d, 0.5)) moved = true;
+    at.forEach(P => small.forEach((c, k) => { if (apart(P, [c.x, c.y, c.z], B[k].need, 1)) moved = true; }));
+    inBlock();
+  }
+  host.forEach((p, a) => { p.bulge = [at[a][0] - p.x, at[a][1] - p.y, at[a][2] - p.z]; p.x = at[a][0]; p.y = at[a][1]; p.z = at[a][2]; });
+}
+// A site's place on the perfect lattice, before any bulge.
+function latticePoint(p) { const b = p.bulge; return b ? { x: p.x - b[0], y: p.y - b[1], z: p.z - b[2] } : p; }
 
 // Giant covalent networks (S4). Every atom is a site with role 'atom' and
 // no charge. lattice.bonds lists the covalent bonds as pairs of site
@@ -1603,7 +1735,7 @@ const LATTICE_BUILDERS = { rockSalt: buildRockSalt, bcc: buildMetal, fcc: buildM
 function particleWord(lat) { return lat && lat.molecules ? 'molecules' : lat && !lat.sites.some(x => x.charge) ? 'atoms' : 'ions'; }
 function latticeLength(lat) {
   const main = lat.sites.filter(x => x.role !== 'interstitial'), rows = new Map();
-  for (const x of main) { const k = Math.round(x.y) + ',' + Math.round(x.z); rows.set(k, (rows.get(k) || 0) + 1); }
+  for (const p of main) { const x = latticePoint(p), k = Math.round(x.y) + ',' + Math.round(x.z); rows.set(k, (rows.get(k) || 0) + 1); }
   return { perEdge: lat.molecules ? Math.round(Math.cbrt(lat.molecules)) : Math.max(...rows.values()), total: lat.molecules || main.length, word: particleWord(lat) };
 }
 function latticeLengthText(lat) { const { perEdge, total, word } = latticeLength(lat); return perEdge + ' ' + word + ' per edge, ' + total + ' ' + word + ' in lattice'; }
@@ -1785,7 +1917,7 @@ if (typeof module !== 'undefined' && module.exports) {
   Object.assign(module.exports, {
     latticeLength, latticeLengthText,
     FIXED_DT, MAX_CATCH_UP_S, createSimClock, advanceSimClock, simTime,
-    LATTICE_BUILDERS, buildLattice, buildRockSalt, buildMetal, buildDiamondCubic, buildSilica, buildHexLayers, hexLayerCount, hexCells, builtSubstances, LAYER_NETS, METAL_STACKING, SECOND_NEIGHBOUR_D,
+    LATTICE_BUILDERS, buildLattice, buildRockSalt, buildMetal, BULGE_X, BULGE_W_D, BULGE_CLEAR, BULGE_NEAR_D, bulgePm, bulgeLattice, latticePoint, buildDiamondCubic, buildSilica, buildHexLayers, hexLayerCount, hexCells, builtSubstances, LAYER_NETS, METAL_STACKING, SECOND_NEIGHBOUR_D,
     siteDistancePm, nearestNeighbours,
     ION_SIZE_SCALE, displayRadiusPm, VIB_RATE_HZ, hash01, vibrationPhases, vibrationOffsetPm, BOND_STRETCH, BOND_STRETCH_LIMIT, BOND_STRETCH_HZ, bondStretchField, stretchBonds,
     SEA_SPEED_D, SEA_FILM_D, buildElectronSea, buildMolecular, molEdges, MOL_ATOM_BUDGET, MOL_GAP, MOL_TILT_DEG, unitOf, bounce01, seaThermalPm,
@@ -1916,6 +2048,18 @@ function temperatureRange(s) {
   return { min, max: Math.round((s.mpC - ABS_ZERO_C) * (1 + SLIDER_PAST_MELT) + ABS_ZERO_C), start: s.mpC > 25 ? 25 : Math.round((min + s.mpC) / 2) };
 }
 function thermometerText(tC) { return fmtC(Math.round(tC) || 0); }
+// The Conductivity tool's dial (S8, bsr-s8-melt). It goes past the melting point only where the
+// model can show the liquid between the electrodes: not a giant covalent structure (decision E:
+// molten silicon conducts like a metal, which the rule does not model), and not a solid that turns
+// straight to gas (there is no liquid at 1 atm). By class and structure data, never by substance.
+// Where it cannot melt, the dial stops at the melting point (the last whole degree of solid).
+function circuitMelts(s) { return s.cls !== 'giantCovalent' && !s.turnsToGas; }
+function circuitTemperatureRange(s) {
+  const r = temperatureRange(s);
+  return circuitMelts(s) ? r : { min: r.min, max: Math.floor(s.mpC), start: Math.min(r.start, Math.floor(s.mpC)) };
+}
+// The dial's range for a tool: the Conductivity tool's own, or the Melting point tool's.
+function toolTemperatureRange(s, kind) { return kind === 'circuit' ? circuitTemperatureRange(s) : temperatureRange(s); }
 
 // ---------------------------------------------------------------------------
 // JOURNEY ANIMATIONS (S2). An animation is a list of beats. Each beat sets
@@ -1950,11 +2094,11 @@ function journeyPhases(s, step) {
 }
 
 const POSE_CHANNELS = {
-  force: ['force'], disp: ['shift', 'lift', 'drift', 'fling'], repel: ['repel'], temp: ['tempC'],
+  force: ['force'], disp: ['shift', 'lift', 'drift', 'fling'], repel: ['repel'], temp: ['tempC', 'meltS'],
   attract: ['attract'], time: ['flowS'], electrons: ['flow', 'jostle', 'current', 'volts'], glow: ['glow', 'seaGlow', 'atomGlow', 'bondGlow', 'weakGlow'], strain: ['strain'],
 };
 function restPose(ctx) {
-  return { force: 0, shift: 0, lift: 0, drift: 0, fling: 0, repel: 0, tempC: ctx.startC, attract: 0, flow: 0, jostle: 0, current: 0, volts: 0,
+  return { force: 0, shift: 0, lift: 0, drift: 0, fling: 0, repel: 0, tempC: ctx.startC, meltS: 0, attract: 0, flow: 0, jostle: 0, current: 0, volts: 0,
     glow: 0, seaGlow: 0, atomGlow: 0, bondGlow: 0, weakGlow: 0, strain: 0, flowS: 0 };
 }
 // Which journey step each kind of animation explains.
@@ -1999,7 +2143,7 @@ const ALLOY_FADE_UP = 0.8, ALLOY_FADE_DOWN = 0.6;   // per layer away from the s
 const ALLOY_HOLD_D = 0.15;    // the rows by a carbon atom lag this far behind the rest as an atom climbs
 const ALLOY_BUNCH_D = 0.1;    // atoms bunch up this far along a row, before and after the hump
 const ALLOY_RIPPLE_D = 0.05;  // each atom rises this far between the hollows of the layer below
-const ALLOY_BULGE_D = 0.1, ALLOY_BULGE_W_D = 1.3;   // every carbon atom pushes its neighbours aside this far, over this range
+const ALLOY_BULGE_D = 0.1, ALLOY_BULGE_W_D = 1.3;   // under load every carbon atom pushes its neighbours aside this much further, over this range
 const ALLOY_NUDGE_D = 0.12;   // an atom coming over shoves the carbon atom on this far
 const ALLOY_CREEP_D = 0.4;    // high-carbon steel: the top half creeps this far, and jams
 const ALLOY_JAM = 0.35;       // … and the distortion grows by this fraction
@@ -2253,9 +2397,9 @@ function animContext(key, s, lattice, opts) {
     // everything above the cut (small atoms in that gap stay below it) can move.
     const planes = [...new Set(sites.filter(x => Number.isInteger(x.j)).map(x => x.j))].sort((a, b) => a - b);
     const jCut = ctx.jCut = planes[Math.floor(planes.length / 2)];
-    const layerY = j => { const L = sites.filter(x => x.j === j); return L.reduce((t, x) => t + x.y, 0) / L.length; };
+    const layerY = j => { const L = sites.filter(x => x.j === j); return L.reduce((t, x) => t + latticePoint(x).y, 0) / L.length; };   // a steel's layers bulge (B33): cut by the lattice points
     ctx.cutY = (layerY(planes[planes.indexOf(jCut) - 1]) + layerY(jCut)) / 2;
-    ctx.upper = sites.map(x => x.y > ctx.cutY + 1e-6 * d);
+    ctx.upper = sites.map(x => latticePoint(x).y > ctx.cutY + 1e-6 * d);
     // The covalent bonds across the cut: these hold the two halves together.
     ctx.cutBonds = bonds.map((b, i) => i).filter(i => ctx.upper[bonds[i][0]] !== ctx.upper[bonds[i][1]]);
     ctx.hot = new Set(ctx.cutBonds);
@@ -2306,7 +2450,7 @@ function animContext(key, s, lattice, opts) {
       const swing = half * (Math.sin(FLING_TURN_DEG[0] * DEG) + Math.sin(FLING_TURN_DEG[1] * DEG));
       ctx.bounds.max[0] += reach.fling * FLING_D * d + swing; ctx.bounds.max[1] += 2 * swing; ctx.bounds.max[2] += swing; ctx.bounds.min[2] -= swing;
     }
-    if (ctx.pin) ctx.bounds.max[0] += ALLOY_CREEP_D * d;   // the bent block stays inside the cube the view already holds
+    if (ctx.pin) { ctx.bounds.max[0] += ALLOY_CREEP_D * d; ctx.bounds.max[1] += 0.1 * d; }   // the bent block stays inside the cube the view already holds; a carbon atom's bulge (B33) can lift the top a little further
   } else if (A.kind === 'heat') {
     ctx.hot = new Set(bonds.map((b, i) => i));
     if (A.attractLines) {
@@ -2345,6 +2489,22 @@ function animContext(key, s, lattice, opts) {
     if (k.conducts && (lattice.sites.length > 1)) ctx.obstacles = seaObstacles(s, lattice, opts.ionScale == null ? ION_SIZE_SCALE.lattice : opts.ionScale);
     const m = WIRE_R_PM;
     ctx.bounds = { min: [-X - Math.max(0.3 * d, m), Yb - Math.max(0.5 * d, m), -half], max: [X + Math.max(k.bulbR, m) + 0.3 * d, half, half] };
+    // Explore's tool has a temperature dial (S8): a heater under the sample and, where the model can
+    // melt (circuitMelts), a crucible whose two side walls are the electrodes, so the melt stays
+    // between them. A question card's circuit has neither (opts.dial unset).
+    if (opts.dial) {
+      ctx.setup = liquidSetup(lattice, half);
+      const V = ctx.vessel = crucibleVessel(ctx, ctx.setup), W = V.inner + V.wall;
+      ctx.heater = { y: V.floorY - V.wall - 0.15 * d, h: 0.3 * d, w: 2 * W + 0.3 * d, wz: 2 * (V.innerZ + V.wall) + 0.3 * d };
+      ctx.floorY = V.floorY;
+      if (V.melts) {
+        k.plateY = (V.floorY - V.wall + V.rim) / 2; k.plateH = V.rim - V.floorY + V.wall; k.plateZ = 2 * (V.innerZ + V.wall);
+        ctx.pool = { min: [-V.inner, V.floorY, -V.innerZ], max: [V.inner, null, V.innerZ] };   // its top: the melt's surface (poolBox)
+      }
+      ctx.bounds.min[1] = Math.min(ctx.bounds.min[1], ctx.heater.y - ctx.heater.h / 2);
+      ctx.bounds.max[1] = Math.max(ctx.bounds.max[1], V.melts ? V.rim + V.wall : half);
+      ctx.bounds.min[2] = Math.min(ctx.bounds.min[2], -ctx.heater.wz / 2); ctx.bounds.max[2] = Math.max(ctx.bounds.max[2], ctx.heater.wz / 2);
+    }
   }
   const span = [0, 1, 2].map(a => ctx.bounds.max[a] - ctx.bounds.min[a]);
   ctx.centrePm = [0, 1, 2].map(a => (ctx.bounds.max[a] + ctx.bounds.min[a]) / 2);
@@ -2453,52 +2613,83 @@ function liquidSetup(lattice, half) {
 function liquidVessel(ctx, setup) {
   const d = ctx.d, half = ctx.half, gas = !!ctx.s.turnsToGas, wall = DISH_WALL_D * d;
   const floorY = Math.min(...setup.units.map((u, k) => u.c[1] - (setup.gap[k] ? setup.wallR[k] : setup.rho[k])));
-  if (gas) { const W = GAS_SPREAD * half; return { gas, floorY, inner: W, wall, rim: floorY + 2 * W }; }
+  if (gas) { const W = GAS_SPREAD * half; return { gas, floorY, inner: W, innerZ: W, wall, rim: floorY + 2 * W }; }
   const W = DISH_W * half, depth = Math.pow(2 * half, 3) / Math.pow(2 * W, 2);   // the pool's depth if it were as dense as the solid
-  return { gas, floorY, inner: W, wall, rim: floorY + 1.25 * depth + setup.rMax };
+  return { gas, floorY, inner: W, innerZ: W, wall, rim: floorY + 1.25 * depth + setup.rMax };
 }
+// The crucible in the Conductivity tool (S8): its walls across x are the electrodes' inner faces, so
+// the melt stays between them; across z it is as wide as the dish, so the pool is shallower than
+// the block and its top stays below the electrodes' top (rim). It has a clear lid at the rim, so a
+// particle thrown up by the melt's jostling stays in it. fit: the electrodes and lid touch the
+// block as drawn, which can be closer than a particle's true size, so a particle keeps from a
+// side wall or the lid only as far as it starts (and never further than its size): the block does
+// not jump as it starts to melt. Lengths / pm.
+function crucibleVessel(ctx, setup) {
+  const d = ctx.d, half = ctx.half, k = ctx.circuit, wall = DISH_WALL_D * d, melts = circuitMelts(ctx.s);
+  const floorY = Math.min(...setup.units.map((u, i) => u.c[1] - (setup.gap[i] ? setup.wallR[i] : setup.rho[i])));
+  const inner = k.plateX - k.plateT / 2, innerZ = melts ? DISH_W * half : half, depth = Math.pow(2 * half, 3) / (4 * inner * innerZ);
+  if (!melts) return { gas: false, lid: false, fit: true, melts, floorY, inner, innerZ, wall, surface: null, rim: Math.max(half, floorY + CRUCIBLE_RIM * depth + setup.rMax) };
+  // the melt's surface (Barry, S8 U1): as high as its particles' volume fills the floor, packed as a liquid packs
+  const liquid = setup.units.reduce((a, u, i) => a + 4 / 3 * Math.PI * Math.pow(setup.rhoLiq[i], 3) / (u.rot ? LIQ_PACK_ROT : LIQ_PACK), 0) / (4 * inner * innerZ);
+  return { gas: false, lid: true, fit: true, melts, floorY, inner, innerZ, wall, surface: floorY + liquid, rim: Math.max(half, floorY + liquid / (1 - CRUCIBLE_GAS)) };
+}
+const CRUCIBLE_RIM = 1.25;   // a crucible that does not melt: the electrodes reach this many times the pool's depth (as if as dense as the solid) above the floor, and at least the block's top
+// A crucible that melts (Barry, S8 U1): the melt has a surface, and above it a gas space, up to the lid.
+const CRUCIBLE_GAS = 1 / 3;   // the gas space's share of the crucible's height, at least (the electrodes reach at least the block's top)
+const LIQ_PACK = 0.54;        // the share of a melt's volume its particles fill: between what the melt filled before it had a surface (0.56–0.64 for ions, of two sizes; 0.48–0.51 for metals), so neither is squeezed much
+const LIQ_PACK_ROT = 0.42;    // … for molecules, whose spheres are their outer atoms' reach (measured 0.35–0.48)
 const _liquidCache = new Map();
 function liquidFor(ctx) {
-  const key = ctx.s.key + '|' + ctx.n + '|' + ctx.key;
-  if (_liquidCache.has(key)) return _liquidCache.get(key);
-  const liq = simulateLiquid(ctx);
+  if (ctx.liquid) return ctx.liquid;   // worked out once for this context
+  const key = ctx.s.key + '|' + ctx.n + '|' + ctx.key + '|' + ctx.half.toFixed(3);   // the vessel's size follows the drawn ion size (half)
+  if (_liquidCache.has(key)) return (ctx.liquid = _liquidCache.get(key));
+  const liq = ctx.liquid = simulateLiquid(ctx);
   _liquidCache.set(key, liq);
   if (_liquidCache.size > 3) _liquidCache.delete(_liquidCache.keys().next().value);
   return liq;
 }
-function simulateLiquid(ctx) {
-  const V = ctx.vessel, gas = V.gas, { units, unitOfSite, localOf, U, rhoLiq, wallR, gap, rMean, rMax } = ctx.setup, rho0 = ctx.setup.rho, rho = Float64Array.from(rho0);
+// One step of the liquid's physics at a time (S8 session 3): the melt's own simulation (simulateLiquid) and the
+// electrolysis (electrolysisStep) both run on this, so they are one physics. S.step(step, m): one step of
+// LIQUID_DT, with the lattice's hold at 1 − m; step seeds the jostle, so the same steps give the same motion.
+// The electrolysis may set, per unit: acc (an extra acceleration, the field on an ion), grav (its own gravity:
+// a metal atom floats or sinks by its density), skip (not in the liquid: a molecule that has left), ownRho
+// (it sets the sizes itself), and obst (spheres the liquid keeps out of: the bubbles).
+function liquidStepper(ctx) {
+  const V = ctx.vessel, gas = V.gas, { units, U, rhoLiq, wallR, gap, rMean, rMax } = ctx.setup, rho0 = ctx.setup.rho, rho = Float64Array.from(rho0);
   const sigma = (gas ? GAS_SIGMA : LIQ_SIGMA) * rMean, gamma = gas ? GAS_GAMMA : LIQ_GAMMA, spin = gas ? GAS_SPIN : LIQ_SPIN;
   const aT = Math.exp(-gamma * LIQUID_DT), bT = Math.sqrt(1 - aT * aT), e = gas ? 1 : LIQ_E;
   const g = gas ? 0 : LIQ_G * rMean, w2 = Math.pow(2 * Math.PI * HOLD_HZ, 2), cd = 2 * 0.35 * 2 * Math.PI * HOLD_HZ;
   const P = new Float64Array(U * 3), Vel = new Float64Array(U * 3), Q = new Float64Array(U * 4), Om = new Float64Array(U * 3);
   const home = new Float64Array(U * 3);
   units.forEach((u, k) => { for (let a = 0; a < 3; a++) P[k * 3 + a] = home[k * 3 + a] = u.c[a]; Q[k * 4 + 3] = 1; });
-  const steps = Math.round(LIQUID_S / LIQUID_DT), nFrames = Math.floor(steps / LIQUID_KEEP) + 1;
-  const frames = new Float32Array(nFrames * U * 7);
-  const save = f => { for (let k = 0; k < U; k++) { const o = (f * U + k) * 7; for (let a = 0; a < 3; a++) frames[o + a] = P[k * 3 + a]; for (let a = 0; a < 4; a++) frames[o + 3 + a] = Q[k * 4 + a]; } };
-  save(0);
   // walls
-  const xMax = V.inner, yLo = V.floorY, yHi = gas ? V.rim : Infinity;
+  const xMax = V.inner, zMax = V.innerZ, yLo = V.floorY, yHi = gas || V.lid ? V.rim : Infinity;
   // a grid of cells 2 × rMax wide, over the vessel
-  const cell = 2 * rMax, nc = Math.max(1, Math.ceil(2 * xMax / cell)), ny = gas ? Math.max(1, Math.ceil((yHi - yLo) / cell)) : 64;
-  const head = new Int32Array(nc * ny * nc), next = new Int32Array(U);
+  const cell = 2 * rMax, nc = Math.max(1, Math.ceil(2 * xMax / cell)), nz = Math.max(1, Math.ceil(2 * zMax / cell)), ny = gas ? Math.max(1, Math.ceil((yHi - yLo) / cell)) : 64;
+  const head = new Int32Array(nc * ny * nz), next = new Int32Array(U);
+  // a crucible (fit): each unit's room to the side walls and the lid, as it starts
+  const fit = V.fit ? units.map(u => [xMax - Math.abs(u.c[0]), yHi - u.c[1], zMax - Math.abs(u.c[2])]) : null;
   const cellOf = (x, y, z) => {
-    const i = Math.min(nc - 1, Math.max(0, Math.floor((x + xMax) / cell))), j = Math.min(ny - 1, Math.max(0, Math.floor((y - yLo) / cell))), k = Math.min(nc - 1, Math.max(0, Math.floor((z + xMax) / cell)));
+    const i = Math.min(nc - 1, Math.max(0, Math.floor((x + xMax) / cell))), j = Math.min(ny - 1, Math.max(0, Math.floor((y - yLo) / cell))), k = Math.min(nz - 1, Math.max(0, Math.floor((z + zMax) / cell)));
     return [i, j, k];
   };
   const gauss = (n) => (hash01(n) + hash01(n + 1000003) + hash01(n + 2000003) - 1.5) * 2;
   const reflect = (k, a, hit, sign) => { P[k * 3 + a] = hit; if (sign * Vel[k * 3 + a] > 0) Vel[k * 3 + a] = -e * Vel[k * 3 + a]; };
-  for (let step = 1; step <= steps; step++) {
-    const tau = step * LIQUID_DT, m = meltAt(tau), hold = 1 - m;
-    if (!gas) for (let k = 0; k < U; k++) rho[k] = rho0[k] + (rhoLiq[k] - rho0[k]) * m;
+  const S = { P, Vel, Q, Om, rho, U, g, gamma, acc: null, grav: null, skip: null, ownRho: false, obst: null, jostle: 1, yLo, yHi, charge: null, passK: 1 };
+  S.step = (step, m) => {
+    const hold = 1 - m, A = S.acc, G = S.grav, X = S.skip, O = S.obst, C = S.charge, K = S.passK;
+    // a melt in the crucible has a surface (S8 U1): it comes down from the lid to the surface as the hold goes, once half gone
+    const surf = gas || V.surface == null || m <= 0.5 ? Infinity : lerp(V.rim, V.surface, easeInOut(2 * m - 1));
+    if (!gas && !S.ownRho) for (let k = 0; k < U; k++) rho[k] = rho0[k] + (rhoLiq[k] - rho0[k]) * m;
     for (let k = 0; k < U; k++) {
+      if (X && X[k]) continue;
       for (let a = 0; a < 3; a++) {
         const i = k * 3 + a;
         let v = Vel[i];
-        if (a === 1) v -= g * LIQUID_DT;
+        if (a === 1) v -= (G ? G[k] : g) * LIQUID_DT;
+        if (A) v += A[i] * LIQUID_DT;
         if (hold > 0) v -= (w2 * hold * (P[i] - home[i]) + cd * hold * v) * LIQUID_DT;
-        v = aT * v + bT * sigma * m * gauss((step * U + k) * 3 + a);
+        v = aT * v + bT * sigma * S.jostle * m * gauss((step * U + k) * 3 + a);
         Vel[i] = v; P[i] += v * LIQUID_DT;
         if (units[k].rot) { Om[i] = aT * Om[i] + bT * spin * m * gauss((step * U + k) * 3 + a + 5e6); }
       }
@@ -2512,24 +2703,37 @@ function simulateLiquid(ctx) {
     for (let pass = 0; pass < 6; pass++) {
       // the vessel
       for (let k = 0; k < U; k++) {
-        const r = gap[k] ? wallR[k] : rho[k];
-        if (P[k * 3 + 1] < yLo + r) reflect(k, 1, yLo + r, -1);
-        if (gas && P[k * 3 + 1] > yHi - r) reflect(k, 1, yHi - r, 1);
+        if (X && X[k]) continue;
+        const r = gap[k] ? wallR[k] : rho[k], f = fit && fit[k];
+        if (P[k * 3 + 1] < S.yLo + r) reflect(k, 1, S.yLo + r, -1);
+        const top = Math.min(S.yHi, surf), ry = top < S.yHi ? r : f ? Math.min(r, f[1]) : r;
+        if (P[k * 3 + 1] > top - ry) reflect(k, 1, top - ry, 1);
         for (const a of [0, 2]) {
-          if (P[k * 3 + a] > xMax - r) reflect(k, a, xMax - r, 1);
-          else if (P[k * 3 + a] < -xMax + r) reflect(k, a, -xMax + r, -1);
+          const w = a ? zMax : xMax, ra = f ? Math.min(r, f[a]) : r;
+          if (P[k * 3 + a] > w - ra) reflect(k, a, w - ra, 1);
+          else if (P[k * 3 + a] < -w + ra) reflect(k, a, -w + ra, -1);
+        }
+        // a bubble: the liquid is pushed out of it, and bounces off it
+        if (O) for (const b of O) {
+          const dx = P[k * 3] - b.c[0], dy = P[k * 3 + 1] - b.c[1], dz = P[k * 3 + 2] - b.c[2], D = b.R + r, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= D * D) continue;
+          const dd = Math.sqrt(d2) || 1, nx = d2 ? dx / dd : -1, ny2 = d2 ? dy / dd : 0, nz = d2 ? dz / dd : 0;
+          P[k * 3] = b.c[0] + nx * D; P[k * 3 + 1] = b.c[1] + ny2 * D; P[k * 3 + 2] = b.c[2] + nz * D;
+          const vn = Vel[k * 3] * nx + Vel[k * 3 + 1] * ny2 + Vel[k * 3 + 2] * nz;
+          if (vn < 0) { Vel[k * 3] -= (1 + e) * vn * nx; Vel[k * 3 + 1] -= (1 + e) * vn * ny2; Vel[k * 3 + 2] -= (1 + e) * vn * nz; }
         }
       }
       // the other particles: push apart, and trade the speed they approach at
       head.fill(-1);
-      for (let k = 0; k < U; k++) { const [i, j, c] = cellOf(P[k * 3], P[k * 3 + 1], P[k * 3 + 2]), h = (i * ny + j) * nc + c; next[k] = head[h]; head[h] = k; }
+      for (let k = 0; k < U; k++) { if (X && X[k]) continue; const [i, j, c] = cellOf(P[k * 3], P[k * 3 + 1], P[k * 3 + 2]), h = (i * ny + j) * nz + c; next[k] = head[h]; head[h] = k; }
       for (let a = 0; a < U; a++) {
+        if (X && X[a]) continue;
         const [ci, cj, ck] = cellOf(P[a * 3], P[a * 3 + 1], P[a * 3 + 2]);
-        for (let i = Math.max(0, ci - 1); i <= Math.min(nc - 1, ci + 1); i++) for (let j = Math.max(0, cj - 1); j <= Math.min(ny - 1, cj + 1); j++) for (let c = Math.max(0, ck - 1); c <= Math.min(nc - 1, ck + 1); c++) {
-          for (let b = head[(i * ny + j) * nc + c]; b >= 0; b = next[b]) {
+        for (let i = Math.max(0, ci - 1); i <= Math.min(nc - 1, ci + 1); i++) for (let j = Math.max(0, cj - 1); j <= Math.min(ny - 1, cj + 1); j++) for (let c = Math.max(0, ck - 1); c <= Math.min(nz - 1, ck + 1); c++) {
+          for (let b = head[(i * ny + j) * nz + c]; b >= 0; b = next[b]) {
             if (b <= a) continue;
             let dx = P[b * 3] - P[a * 3], dy = P[b * 3 + 1] - P[a * 3 + 1], dz = P[b * 3 + 2] - P[a * 3 + 2];
-            const D = (gap[a] && gap[b] ? wallR[a] + wallR[b] : rho[a] + rho[b]), d2 = dx * dx + dy * dy + dz * dz;
+            const D = (gap[a] && gap[b] ? wallR[a] + wallR[b] : rho[a] + rho[b]) * (C && C[a] * C[b] < 0 ? K : 1), d2 = dx * dx + dy * dy + dz * dz;
             if (d2 >= D * D) continue;
             let dist = Math.sqrt(d2);
             if (dist < 1e-9) { dx = 1; dy = 0; dz = 0; dist = 1; }
@@ -2546,9 +2750,31 @@ function simulateLiquid(ctx) {
         }
       }
     }
+  };
+  return S;
+}
+function simulateLiquid(ctx) {
+  const V = ctx.vessel, gas = V.gas, { units, unitOfSite, localOf, U, rhoLiq } = ctx.setup, rho0 = ctx.setup.rho, S = liquidStepper(ctx), P = S.P, Q = S.Q;
+  const steps = Math.round(LIQUID_S / LIQUID_DT), nFrames = Math.floor(steps / LIQUID_KEEP) + 1;
+  const frames = new Float32Array(nFrames * U * 7);
+  const save = f => { for (let k = 0; k < U; k++) { const o = (f * U + k) * 7; for (let a = 0; a < 3; a++) frames[o + a] = P[k * 3 + a]; for (let a = 0; a < 4; a++) frames[o + 3 + a] = Q[k * 4 + a]; } };
+  save(0);
+  for (let step = 1; step <= steps; step++) {
+    S.step(step, meltAt(step * LIQUID_DT));
     if (step % LIQUID_KEEP === 0) save(step / LIQUID_KEEP);
   }
-  return { U, units, unitOfSite, localOf, rho: gas ? rho0 : rhoLiq, frames, nFrames, perS: 1 / (LIQUID_DT * LIQUID_KEEP), vessel: V };
+  // The pool's surface (S8): over the half that plays back and forth, the height below which nine in ten units' tops lie.
+  let surfaceY = V.surface == null ? null : V.surface;   // a crucible's melt: the surface it is held under
+  if (!gas && surfaceY === null) {
+    const tops = new Float64Array(U), h = Math.floor(nFrames / 2);
+    let sum = 0;
+    for (let f = h; f < nFrames; f++) {
+      for (let k = 0; k < U; k++) tops[k] = frames[(f * U + k) * 7 + 1] + rhoLiq[k];
+      tops.sort(); sum += tops[Math.floor(0.9 * (U - 1))];
+    }
+    surfaceY = sum / (nFrames - h);
+  }
+  return { U, units, unitOfSite, localOf, rho: gas ? rho0 : rhoLiq, frames, nFrames, perS: 1 / (LIQUID_DT * LIQUID_KEEP), vessel: V, surfaceY };
 }
 // The frame position of the liquid clock: the simulation, then its last
 // half back and forth, so the liquid keeps flowing and never re-forms the lattice.
@@ -2623,11 +2849,14 @@ function poseReach(ctx, fields) {
   return out;
 }
 
-// The steels' distortion (B17). snags: the carbon atoms in the slip gap, which
-// stay with the lower half. up[i]: how much of a hump reaches a site above the
-// cut. rest: at full force, what does not change as the layers slide: how the
-// lower half bends round the snags, and every carbon atom's push on the
-// neighbours on its own side.
+// The steels' distortion (B17). The sites already hold each carbon atom's
+// bulge at rest (bulgeLattice, B33); the press adds to it. snags: the carbon
+// atoms in the slip gap, which stay with the lower half. up[i]: how much of a
+// hump reaches a site above the cut. rest: at full force, what does not change
+// as the layers slide: how the lower half bends round the snags, and every
+// carbon atom's further push on the neighbours on its own side. cross[i]: the
+// carbon atoms on the other side of the cut that bulge site i, so the bulge
+// can move with its carbon atom as the layers slide.
 function pinProfile(u) {   // a hump with a hollow each side; u is the distance along the row / pm ÷ the width
   const a = ALLOY_HOLE_AT_D / ALLOY_WIDTH_D;
   return Math.exp(-u * u) - ALLOY_HOLE * (Math.exp(-(u - a) * (u - a)) + Math.exp(-(u + a) * (u + a)));
@@ -2636,7 +2865,8 @@ function pinClose(dz) { return Math.exp(-Math.pow(dz / ALLOY_ACROSS_D, 2)); }   
 function pinnedField(ctx) {
   const sites = ctx.lattice.sites, d = ctx.d, N = sites.length, jGap = ctx.jCut - 1;
   const isSnag = (x, i) => x.role === 'interstitial' && !ctx.upper[i] && Math.floor(x.j) === jGap;
-  const snags = [], snagOf = new Int32Array(N).fill(-1), up = new Float64Array(N), rest = new Float64Array(N * 3);
+  const snags = [], snagOf = new Int32Array(N).fill(-1), up = new Float64Array(N), rest = new Float64Array(N * 3), B = ctx.lattice.bulgeOf || [];
+  const small = sites.map((x, i) => i).filter(i => sites[i].role === 'interstitial'), cross = sites.map(() => null), guard = sites.map(() => null);
   sites.forEach((x, i) => { if (isSnag(x, i)) { snagOf[i] = snags.length; snags.push({ x: x.x, z: x.z }); } });
   sites.forEach((p, i) => {
     if (ctx.upper[i]) up[i] = Math.pow(ALLOY_FADE_UP, p.j - ctx.jCut);
@@ -2645,24 +2875,61 @@ function pinnedField(ctx) {
       rest[i * 3 + 1] += Math.pow(ALLOY_FADE_DOWN, Math.max(0, jGap - p.j)) * d * f * (ALLOY_FOLD_D - ALLOY_SAG_D * close);
     }
     else rest[i * 3 + 1] += (ALLOY_FOLD_D + 0.5 * (ALLOY_HUMP_D - ALLOY_SAG_D)) * d;   // the carbon atom stays half way across the opened gap
+    if (p.role === 'interstitial') return;
     sites.forEach((c, k) => {
-      if (c.role !== 'interstitial' || k === i || ctx.upper[k] !== ctx.upper[i] || p.role === 'interstitial') return;
+      if (c.role !== 'interstitial' || ctx.upper[k] !== ctx.upper[i]) return;
       const v = [p.x - c.x, p.y - c.y, p.z - c.z], q = Math.hypot(v[0], v[1], v[2]), b = ALLOY_BULGE_D * d * Math.exp(-Math.pow(q / (ALLOY_BULGE_W_D * d), 2)) / q;
       for (let a = 0; a < 3; a++) rest[i * 3 + a] += b * v[a];
     });
+    const o = latticePoint(p);
+    small.forEach((k, m) => {
+      const c = sites[k], v = [o.x - c.x, o.y - c.y, o.z - c.z];
+      if (ctx.upper[k] !== ctx.upper[i] && Math.hypot(v[0], v[1], v[2]) < 3 * B[m].w) (cross[i] = cross[i] || []).push({ B: B[m], v });
+      if (Math.hypot(v[0], v[1], v[2]) < (ALLOY_SLIDES + ALLOY_CREEP_D + 2) * d) (guard[i] = guard[i] || []).push(k);
+    });
   });
-  return { snags, snagOf, up, rest };
+  return { snags, snagOf, up, rest, cross, guard, small };
 }
 // How far the steels' distortion has built: nothing with no force, all of it
 // at the force the steel gives way at; a shatter releases it.
 function pinLoad(ctx, pose) { return clamp(pose.force / ctx.forceMax, 0, 1) * (1 - clamp(pose.lift, 0, 1)); }
 // Adds the distortion to a site's offset. Depends only on the pose, and an
-// atom keeps its row (z) and its place along that row.
+// atom keeps its row (z) and its place along that row. However the layers
+// bend, no iron atom comes nearer a carbon atom than their true radii allow
+// (guard): it is held against it instead.
+// Where every carbon atom is in this pose, worked out once per pose (the frame's iron atoms all need them).
+function pinCarbonsPm(ctx, pose) {
+  const P = ctx.pin, sig = [pose.shift, pose.lift, pose.fling, pose.force, pose.strain].join();
+  if (P.memo && P.memo.sig === sig) return P.memo.at;
+  const st = ctx.lattice.sites, at = new Float64Array(st.length * 3), o = [0, 0, 0];
+  P.small.forEach(k => { siteOffsetPm(ctx, pose, k, o); at[3 * k] = st[k].x + o[0]; at[3 * k + 1] = st[k].y + o[1]; at[3 * k + 2] = st[k].z + o[2]; });
+  P.memo = { sig, at };
+  return at;
+}
 function pinOffsetPm(ctx, pose, i, out) {
-  const P = ctx.pin, load = pinLoad(ctx, pose);
+  pinBendPm(ctx, pose, i, out);
+  const G = ctx.pin.guard[i];
+  if (!G) return;
+  const p = ctx.lattice.sites[i], at = pinCarbonsPm(ctx, pose), e = [0, 0, 0];
+  for (let pass = 0, moved = true; pass < 20 && moved; pass++) {
+    moved = false;
+    for (const k of G) {
+      e[0] = p.x + out[0] - at[3 * k]; e[1] = p.y + out[1] - at[3 * k + 1]; e[2] = p.z + out[2] - at[3 * k + 2];
+      const r = Math.hypot(e[0], e[1], e[2]), need = p.rPm + ctx.lattice.sites[k].rPm;
+      if (r < need && r > 0) { for (let a = 0; a < 3; a++) out[a] += e[a] / r * (need - r); moved = true; }
+    }
+  }
+}
+function pinBendPm(ctx, pose, i, out) {
+  const P = ctx.pin, load = pinLoad(ctx, pose), d = ctx.d, held = 1 - clamp(pose.lift, 0, 1), creep = pose.strain * ALLOY_CREEP_D * d * held, S = pose.shift * ctx.slideD + creep;
+  // A bulge from a carbon atom across the cut moves with that atom; a broken-off piece keeps the shape it had.
+  if (P.cross[i] && held && (S || pose.lift)) {
+    const sign = ctx.upper[i] ? 1 : -1, dx = sign * S, dy = sign * pose.lift * SPLIT_LIFT_D * d, w = [0, 0, 0];
+    for (const { B, v } of P.cross[i]) { bulgePm(B, [v[0] + dx, v[1] + dy, v[2]], 1, w); bulgePm(B, v, -1, w); }
+    out[0] += held * w[0]; out[1] += held * w[1]; out[2] += held * w[2];
+  }
   if (!load) return;
-  const d = ctx.d, p = ctx.lattice.sites[i], amp = load * (1 + ALLOY_JAM * pose.strain), creep = pose.strain * ALLOY_CREEP_D * d * (1 - clamp(pose.lift, 0, 1));
-  const S = pose.shift * ctx.slideD + creep, k = i * 3;
+  const p = ctx.lattice.sites[i], amp = load * (1 + ALLOY_JAM * pose.strain), k = i * 3;
   out[0] += amp * P.rest[k]; out[1] += amp * P.rest[k + 1]; out[2] += amp * P.rest[k + 2];
   if (P.snagOf[i] >= 0) { if (S) out[0] += amp * ALLOY_NUDGE_D * d * (1 - Math.cos(2 * Math.PI * S / d)) / 2; return; }   // shoved on as an atom comes over; springs back as it passes
   if (!ctx.upper[i]) return;
@@ -2762,8 +3029,15 @@ function siteOffsetPm(ctx, pose, i, out) {
   }
   if (ctx.pin) pinOffsetPm(ctx, pose, i, out);
   if (ctx.sag) out[1] -= pose.force * ctx.sagDepth * ctx.sag[i];
-  if (pose.flowS > 0 && ANIMATIONS[ctx.key].kind === 'heat') {
-    liquidSitePm(ctx, pose.flowS, i, out);
+  if (pose.elec && ctx.pool) {   // the electrolysis (S8 session 3) has its own state once the voltage drives the melt
+    electrolysisSitePm(ctx, pose.elec, i, pose.elecF === undefined ? 1 : pose.elecF, out);
+    const p = ctx.lattice.sites[i];
+    out[0] -= p.x; out[1] -= p.y; out[2] -= p.z;
+    return out;
+  }
+  const tau = liquidTauS(ctx, pose);
+  if (tau > 0) {
+    liquidSitePm(ctx, tau, i, out);
     const p = ctx.lattice.sites[i];
     out[0] -= p.x; out[1] -= p.y; out[2] -= p.z;
     return out;
@@ -2776,6 +3050,8 @@ function siteOffsetPm(ctx, pose, i, out) {
   }
   return out;
 }
+// The liquid clock of a pose: the heater's (flowS), or the melt in the Conductivity tool's crucible (meltS, S8).
+function liquidTauS(ctx, pose) { return ANIMATIONS[ctx.key].kind === 'heat' ? pose.flowS : ctx.pool ? pose.meltS : 0; }
 function animVibrationPm(ctx, pose) { return vibrationAmplitudePm(ctx.s, pose.tempC); }
 // How far the spring's push has carried the piece it throws.
 function thrownPm(ctx, pose) { return (pose.fling || 0) * FLING_D * ctx.d; }
@@ -2898,7 +3174,7 @@ function crowdMap(lp, c, q) {
 // How crowded the (−) wire is: it builds as the cell pushes (flow); in a
 // conductor it evens out again once the current flows.
 function wireCrowd(ctx, pose) {
-  const relax = ctx.circuit.conducts ? easeInOut(clamp(pose.current, 0, 1)) : 0;
+  const relax = ctx.circuit.conducts ? easeInOut(clamp(pose.current, 0, 1)) : ionMeltShare(ctx, pose);   // a melt of ions: its electrons move only with the electrolysis (S8)
   return WIRE_CROWD * clamp(pose.flow, 0, 1) * (1 - relax);
 }
 // How far the current has carried every electron / pm: a slow drift toward
@@ -2915,7 +3191,7 @@ function driftPm(ctx, pose) {
 // electron in the gap or the cell is not drawn. wire: 0 (−), 1 (+), −1 hidden.
 const _wt = [0, 0, 0];
 function wireElectronsAt(ctx, pose, tSec) {
-  const k = ctx.circuit, lp = k.loop, g = k.gapPm, c = wireCrowd(ctx, pose), D = driftPm(ctx, pose), out = [];
+  const k = ctx.circuit, lp = k.loop, g = k.gapPm, c = wireCrowd(ctx, pose), D = driftPm(ctx, pose) + electrolysisRingPm(ctx, pose), out = [];
   const A = WIRE_WANDER * g, lat = (WIRE_R_PM - ELECTRON_R_PM - WIRE_EDGE_PM) / Math.SQRT2, TAU = 2 * Math.PI;
   for (let n = 0; n < k.nWire; n++) {
     const h = a => hash01(80021 + n * 11 + a), wave = (i, a) => Math.sin(TAU * WIRE_HZ[i] * (0.7 + 0.6 * h(a)) * tSec + TAU * h(a + 1));
@@ -3081,9 +3357,391 @@ function seaFlowPm(ctx, pose, sea, e, tSec, out) {
   }
   return out;
 }
-// The bulb lights only if charge can flow all the way through the sample,
-// and only once the current flows.
-function bulbLit(ctx, pose) { return conductivity(ctx.s, 'solid').conducts ? clamp(pose.current * 6, 0, 1) : 0; }
+// A molten metal in the Conductivity tool's crucible (S8): the delocalised electrons still drift
+// on toward (+), as in the solid, but through the pool, which has moved since it was a block. As
+// the lattice lets go (meltAt) each electron moves from its path in the solid (seaFlowPm) to the
+// same path in the pool: the same thermal path and drift across x (the electrodes' faces, which
+// the pool's walls are), scaled from the block's height and depth to the pool's. In the melt the
+// ions move, so the sea does not swerve round them (as in the Melting point tool's melt).
+function poolBox(ctx) {
+  const P = ctx.pool;
+  if (P.max[1] === null) P.max[1] = liquidFor(ctx).surfaceY;
+  return P;
+}
+function meltSeaPm(ctx, pose, sea, e, tSec, out) {
+  const box = e.box || sea.box, P = poolBox(ctx), m = meltAt(pose.meltS), D = driftPm(ctx, pose);
+  seaFlowPm(ctx, pose, sea, e, tSec, out);
+  const lo = box.min[0], W = box.max[0] - lo;
+  if (W > 0) {   // the drift across x without the swerve; the swerve fades as the lattice lets go (the gap a wrap leaves is never blended across)
+    const ux = lo + (((e.p0[0] - lo + e.v[0] * tSec + D) % W) + W) % W;
+    let dx = out[0] - ux;
+    if (dx > W / 2) dx -= W; else if (dx < -W / 2) dx += W;
+    out[0] = ux + (1 - m) * dx;
+  }
+  for (let a = 1; a < 3; a++) {
+    const b0 = box.min[a], bs = box.max[a] - b0, p0 = P.min[a], ps = P.max[a] - p0;
+    const f = bs > 0 ? (e.p0[a] - b0) / bs : 0.5, u = f * ps + e.v[a] * tSec, to = p0 + ps * bounce01(u / ps);
+    out[a] += (to - out[a]) * m;
+  }
+  return out;
+}
+// The bulb lights only if charge can flow all the way through the sample, and only once the current
+// flows. Solid, or molten in the Conductivity tool (S8): the rule (conductivity) decides which.
+// Delocalised electrons carry the current as in the solid. Ions carry it only by being discharged at
+// the electrodes, so the bulb follows the rate of discharge (electrolysisCurrent).
+function circuitState(ctx, pose) { return pose.tempC > ctx.s.mpC ? 'liquid' : 'solid'; }
+function bulbLit(ctx, pose) {
+  const c = conductivity(ctx.s, circuitState(ctx, pose));
+  if (!c.conducts) return 0;
+  return c.carrier === 'ions' ? electrolysisCurrent(ctx, pose) : clamp(pose.current * 6, 0, 1);
+}
+// The current through a melt, 0 … 1 (S8 session 3): the rate at which electrons cross from the ions to the
+// electrodes (electrolysisStep), as a share of the most the cell drives at full voltage. No electrolysis, no current.
+function electrolysisCurrent(ctx, pose) { return pose.elec ? clamp(pose.elec.current / ELEC_RATE, 0, 1) : 0; }
+
+// ---------------------------------------------------------------------------
+// THE ELECTROLYSIS (S8 session 3, S8-PLAN.html Part 2). A molten ionic compound in the Conductivity tool's
+// crucible, the voltage on. Its own state, worked out in fixed steps of ELEC_DT (exact replay), on the
+// melt's own physics (liquidStepper), started from the melt's playback at the moment the voltage first
+// drives it. In each step:
+//  - every ion drifts toward the electrode of opposite charge, on top of its wander, faster at a higher voltage;
+//  - the cell drives electrons at a rate set by the voltage. One electron at a time goes from a negative ion
+//    touching the anode (+) into the anode (oxidation), and the wire's ring of electrons moves on: the
+//    electron at its other end goes from the cathode (−) into a positive ion touching it (reduction). So
+//    electrons into (+) = electrons out of (−) in every step, the ring moves one place per electron, and
+//    none appear or vanish. Each electron takes ELEC_TICKS steps to cross;
+//  - an ion that has given (taken) all its charge is an atom. At the anode, two atoms join as a molecule;
+//    the molecules gather into a bubble (a gas: electrolysisProducts), which rises and leaves through the
+//    surface. At the cathode, the metal atom (a liquid) floats or sinks by its density against the melt's;
+//  - the ions are used up (decision D): nothing refills the melt but Reset.
+// Lengths / pm; times in steps.
+// ---------------------------------------------------------------------------
+const ELEC_DT = 1 / 30;          // one step; the physics runs two steps of LIQUID_DT in it
+const ELEC_RATE = 4;             // electrons a second the cell drives through the melt at VOLT_MAX
+const ELEC_TICKS = 6;            // steps for one electron to cross (0.2 s): the ring moves 1 / ELEC_TICKS of a place a step
+const ELEC_PUSH_G = 0.25;         // the field's push on an ion at VOLT_MAX, × its weight in the melt (so it drifts through the crowd)
+const ELEC_TOUCH = 0.15;         // an ion touches an electrode within this × the mean particle radius of it
+const ELEC_GROW = 8;             // steps for an ion's size to become its atom's
+const ELEC_CURRENT_S = 1.5;      // the bulb follows the rate of discharge over about this long / s
+const BUBBLE_MOLS = 3;           // molecules in a bubble when it lets go of the anode
+const BUBBLE_WAIT_S = 4;         // a bubble that is not full lets go after this long / s
+const BUBBLE_JOIN = 12;          // steps for a new molecule to move into its bubble
+const BUBBLE_GAS = 1.3;          // a bubble's radius for one molecule, × the molecule's half-length (a gas is spread out)
+const BUBBLE_RISE_D = 1.2;       // a bubble's speed up the anode, × d per second
+const ELEC_CURRENT_OFF = 0.01;    // below this share of the full-voltage rate the smoothed current is 0 (B36)
+const ION_ROOM = 1.6;            // the ions' liquid is at least this many of its largest particle's diameters deep, so the last few can pass each other
+const GAS_SETTLE = 30;           // steps for a molecule, out of the burst bubble, to join the gas (Barry, S8 U1: the gas stays, in the space above the melt)
+const GAS_SPEED_D = 1.2;         // a gas molecule's speed across the gas space / d per second, about (each its own, from 0.5 to 1.5 times)
+const ELEC_PASS = 0.75;          // a positive and a negative ion can come this close, × their sizes added, so ions pushed opposite ways can pass (hard spheres lock solid); drawn as a lattice (half size) they never touch
+const ELEC_SLIP = 0;            // how hard two touching ions pushed into each other are turned aside, × the field's push
+const ELEC_JOSTLE = 1.5;         // the melt jostles this much harder in the electrolysis, so ions pushed opposite ways slip past each other
+const METAL_LIFT = 2;           // the metal's float (or sink) is this many times what the densities give
+const ELEC_SEED = 300000;        // the electrolysis's jostle is seeded past the melt's own steps
+const EL_ION = 0, EL_ATOM = 1, EL_METAL = 2, EL_MOL = 3, EL_GAS = 4, EL_POOL = 5;
+const POOL_MAX_S = 6;           // a metal atom joins the pool after this long / s, wherever it is (so none is kept in the melt by a crowd)
+const POOL_JOIN = 15;           // steps for a metal atom that reaches the pool to settle into it
+const POOL_WOBBLE = 0.08;       // the pool's atoms wander this much of their spacing (it is a liquid)
+// Which tool's melt can be electrolysed: a melt in the crucible whose carriers are ions (the rule), never a substance.
+function electrolysisReady(ctx) { return !!ctx.pool && conductivity(ctx.s, 'liquid').carrier === 'ions'; }
+// The electrolysis may start once the melt has let go of the lattice entirely (meltAt = 1).
+function electrolysisCanRun(ctx, meltS) { return electrolysisReady(ctx) && meltS >= MELT_RAMP_S; }
+// What does not change in a run: each unit's ion (one ion a unit), and its size and gravity as an atom.
+function elecSetup(ctx) {
+  if (ctx.elecSet) return ctx.elecSet;
+  const liq = liquidFor(ctx), U = liq.U, sites = ctx.lattice.sites, prod = electrolysisProducts(ctx.s), rhoLiq = ctx.setup.rhoLiq;
+  const sign = new Int8Array(U), site = new Int32Array(U), size = new Float64Array(U);
+  let an3 = 0, nAn = 0;
+  for (let k = 0; k < U; k++) { const i = liq.units[k].sites[0]; site[k] = i; sign[k] = sites[i].charge > 0 ? 1 : -1; if (sign[k] < 0) { an3 += Math.pow(rhoLiq[k], 3); nAn++; } }
+  an3 /= nAn;
+  // an atom's size in the liquid: a non-metal atom as its ion's, by their radii; a metal atom takes the room its
+  // density gives it (metalVolume of one pair of ions), so the metal and what is left of the melt fill the crucible as they would
+  for (let k = 0; k < U; k++) size[k] = sign[k] < 0 ? rhoLiq[k] * prod.anode.rPm / sites[site[k]].rPm : Math.cbrt(prod.metalVolume * (Math.pow(rhoLiq[k], 3) + an3));
+  // a metal atom: its weight, and while it is under the melt's surface the melt's push up on it (Archimedes),
+  // from the two densities; the push is made METAL_LIFT times stronger so it rises through the crowd of ions in
+  // seconds (a metal that is denser than the melt still sinks: lift < 1)
+  const g = LIQ_G * ctx.setup.rMean, lift = prod.meltDensity / prod.cathode.density, gMetal = g * (1 - METAL_LIFT * lift);
+  const half = prod.anode.bondPm / 2, R1 = BUBBLE_GAS * (half + prod.anode.rPm);
+  // the pool of liquid metal: its atoms touching, in layers across the crucible, filled from the cathode's side
+  let rm = 0, nc = 0;
+  for (let k = 0; k < U; k++) if (sign[k] > 0) { rm += size[k]; nc++; }
+  rm /= nc;
+  const V = ctx.vessel, sp = 2 * rm, nx = Math.max(1, Math.floor(2 * V.inner / sp)), nz = Math.max(1, Math.floor(2 * V.innerZ / sp));
+  // how tightly the melt's particles fill it at the start: the pool fills the same share of its room, so the metal and the
+  // ions left take the room their volumes give (a layer of the pool is as thick as its atoms' volume needs)
+  let vIons = 0;
+  for (let k = 0; k < U; k++) vIons += 4 / 3 * Math.PI * Math.pow(rhoLiq[k], 3);
+  const area = 4 * V.inner * V.innerZ, fill = vIons / (area * (liq.surfaceY - V.floorY)), vAtom = 4 / 3 * Math.PI * rm * rm * rm;
+  const pool = { r: rm, sp, nx, nz, per: nx * nz, perAtom: vAtom / (area * fill), x0: -V.inner + rm + (2 * V.inner - nx * sp) / 2, z0: -V.innerZ + rm + (2 * V.innerZ - nz * sp) / 2 };
+  pool.dy = pool.per * pool.perAtom;
+  return (ctx.elecSet = { liq, U, sign, site, size, prod, g, lift, gMetal, half, R1, pool, area, fill });
+}
+// The state when the voltage first drives the melt, at liquid clock tauS: the melt as the playback has it,
+// moving as it moves.
+function electrolysisStart(ctx, tauS) {
+  const E = elecSetup(ctx), liq = E.liq, U = E.U, S = liquidStepper(ctx), z = [0, 0, 0], a = [0, 0, 0], b = [0, 0, 0];
+  for (let k = 0; k < U; k++) {
+    liquidPointPm(liq, tauS, k, z, a); liquidPointPm(liq, tauS + ELEC_DT, k, z, b);
+    for (let q = 0; q < 3; q++) { S.P[k * 3 + q] = a[q]; S.Vel[k * 3 + q] = (b[q] - a[q]) / ELEC_DT; }
+  }
+  S.rho.set(liq.rho); S.ownRho = true; S.jostle = ELEC_JOSTLE; S.charge = Int8Array.from(E.sign); S.passK = ELEC_PASS;
+  S.acc = new Float64Array(U * 3); S.grav = new Float64Array(U).fill(E.g); S.skip = new Uint8Array(U); S.obst = [];
+  return { n: 0, tau0: tauS, S, P0: Float64Array.from(S.P), kind: new Uint8Array(U), ticks: new Int32Array(U), grow: new Float64Array(U), busy: new Uint8Array(U),
+    transfers: [], waiting: [], mols: [], bubbles: [], pool: [], poolFrom: [], poolBorn: [], ring: 0, ringPrev: 0, budget: 0, current: 0, surfaceY: liq.surfaceY, ionTop: liq.surfaceY, last: { inE: 0, outE: 0 } };
+}
+const bubbleR = (E, n) => E.R1 * Math.cbrt(Math.max(1, n));
+// A bubble's centre and radius at step time t (pure: from when it formed, let go and burst).
+function bubbleAt(ctx, st, b, t, out) {
+  const E = elecSetup(ctx), R = bubbleR(E, b.mols.filter(m => st.mols[m].born <= t).length);
+  out[0] = ctx.vessel.inner - R; out[2] = b.z0;
+  out[1] = b.y0 + (b.released === null || t < b.released ? 0 : BUBBLE_RISE_D * ctx.d * (Math.min(t, b.burst === null ? t : b.burst) - b.released) * ELEC_DT);
+  return R;
+}
+// Where atom `end` (0 or 1) of molecule m is at step time t; and how much of it is left (it fades as it goes).
+const _bc = [0, 0, 0];
+function moleculeAtomPm(ctx, st, m, end, t, out) {
+  const E = elecSetup(ctx), M = st.mols[m], b = st.bubbles[M.bubble], R = bubbleAt(ctx, st, b, t, _bc), slot = b.mols.indexOf(m), TAU = 2 * Math.PI;
+  // its place in the bubble, and its turning
+  const h = q => hash01(60013 + M.a * 7 + q), th = TAU * h(0), ph = Math.acos(2 * h(1) - 1), off = 0.42 * R * (slot ? 1 : 0.3);
+  const cx = _bc[0] + off * Math.sin(ph) * Math.cos(th), cy = _bc[1] + off * Math.cos(ph), cz = _bc[2] + off * Math.sin(ph) * Math.sin(th);
+  const f = easeInOut(clamp((t - M.born) / BUBBLE_JOIN, 0, 1)), g = b.burst === null || t <= b.burst ? 0 : easeInOut(clamp((t - b.burst) / GAS_SETTLE, 0, 1));
+  const w = TAU * (0.25 + 0.2 * h(2)) * t * ELEC_DT + TAU * h(3), s = end ? 1 : -1;
+  let ax = Math.cos(w) * Math.sin(1 + h(4)), ay = Math.sin(w) * Math.sin(1 + h(4)), az = Math.cos(1 + h(4));
+  if (g > 0) {   // in a gas space too low for it to stand up in, it lies flatter, so it stays out of the liquid and under the lid
+    const room = Math.max(0, ((ctx.vessel.rim - st.surfaceY) / 2 - E.size[M.a]) / E.half);
+    if (Math.abs(ay) > room) { const k = Math.sqrt((1 - room * room) / Math.max(1e-9, ax * ax + az * az)); ay = Math.sign(ay) * room; ax *= k; az *= k; }
+    const r = E.size[M.a]; _ge[0] = E.half * Math.abs(ax) + r; _ge[1] = E.half * Math.abs(ay) + r; _ge[2] = E.half * Math.abs(az) + r; gasWanderPm(ctx, st, m, t, _gw, _ge); }
+  const px = lerp(lerp(M.from[0], cx, f), _gw[0], g), py = Math.min(lerp(lerp(M.from[1], cy, f), _gw[1], g), ctx.vessel.rim - E.half * Math.abs(ay) - E.size[M.a]), pz = lerp(lerp(M.from[2], cz, f), _gw[2], g);   // never through the lid
+  out[0] = px + s * E.half * ax; out[1] = py + s * E.half * ay; out[2] = pz + s * E.half * az;
+  return 1;
+}
+// A molecule in the gas space (S8 U1): it crosses it in straight lines and bounces off the walls, the lid and the
+// liquid's surface, each axis at its own speed; the gas space's height is the lid less the liquid's top now. / pm
+// e: how far the molecule reaches from its centre along each axis, as it is turned now.
+const _gw = [0, 0, 0], _ge = [0, 0, 0];
+function gasWanderPm(ctx, st, m, t, out, e) {
+  const V = ctx.vessel, h = q => hash01(70019 + m * 11 + q);
+  const lo = [-V.inner + e[0], st.surfaceY + e[1], -V.innerZ + e[2]], hi = [V.inner - e[0], V.rim - e[1], V.innerZ - e[2]], L0 = [2 * V.inner, V.rim - V.surface, 2 * V.innerZ];
+  for (let q = 0; q < 3; q++) {
+    const u = h(q) * 2 + GAS_SPEED_D * ctx.d * (0.5 + h(q + 3)) * t * ELEC_DT / L0[q], w = u % 2, tri = w < 1 ? w : 2 - w;
+    out[q] = hi[q] > lo[q] ? lo[q] + (hi[q] - lo[q]) * tri : q === 1 ? hi[q] : (lo[q] + hi[q]) / 2;   // no room: under the lid
+  }
+  return out;
+}
+// The liquid metal touching the cathode, and every metal atom touching that (one liquid): it conducts, so it is
+// part of the cathode, and a positive ion that touches it is reduced there too.
+function cathodeMetal(ctx, st) {
+  const E = elecSetup(ctx), S = st.S, P = S.P, tol = ELEC_TOUCH * ctx.setup.rMean, W = ctx.vessel.inner, on = [], seen = new Uint8Array(E.U);
+  for (let k = 0; k < E.U; k++) if (st.kind[k] === EL_METAL && W + P[k * 3] - S.rho[k] <= tol) { on.push(k); seen[k] = 1; }
+  for (let q = 0; q < on.length; q++) {
+    const a = on[q];
+    for (let b = 0; b < E.U; b++) {
+      if (seen[b] || st.kind[b] !== EL_METAL) continue;
+      if (Math.hypot(P[a * 3] - P[b * 3], P[a * 3 + 1] - P[b * 3 + 1], P[a * 3 + 2] - P[b * 3 + 2]) <= S.rho[a] + S.rho[b] + tol) { on.push(b); seen[b] = 1; }
+    }
+  }
+  return on;
+}
+// The pool of liquid metal (S8): a metal atom that has risen to the melt's surface (or sunk to its floor) joins it and
+// leaves the ions' liquid. Slot j's centre / pm. A pool that floats lies on the ions' surface (ionTop), so it goes down
+// as the melt runs down; one that sinks lies on the floor, and the ions lie on it.
+function poolSlotPm(ctx, st, j, out) {
+  const E = elecSetup(ctx), Q = E.pool, L = Math.floor(j / Q.per), q = j % Q.per, ix = Math.floor(q / Q.nz), iz = q % Q.nz, odd = L % 2 ? 0.5 : 0;
+  out[0] = Math.min(Q.x0 + (ix + odd) * Q.sp, ctx.vessel.inner - Q.r); out[2] = Math.min(Q.z0 + (iz + odd) * Q.sp, ctx.vessel.innerZ - Q.r);
+  const Y = poolLayers(ctx, st); out[1] = Y.c0 + L * Y.sp;
+  return out;
+}
+const poolDepth = (E, n) => n * E.pool.perAtom;   // the pool's depth / pm, from its volume: the ions' ceiling (or floor)
+// The pool as drawn (B35, S8 U1): in layers of atoms, each layer as thick as its atoms' volume (dy), so the pool fills
+// what its volume fills; dy is less than an atom's width, so the atoms of a liquid metal overlap a little. It lies on
+// the ions' surface (poolBottom), its lowest layer's centres half a layer above it (so sunk a little into it, as a
+// floating liquid is), or on the floor with no ions left, and never goes through the lid.
+// { c0: the centre height of its bottom layer, sp: the height between layers } / pm.
+function poolLayers(ctx, st) {
+  const E = elecSetup(ctx), Q = E.pool, V = ctx.vessel, n = Math.max(1, Math.ceil(st.pool.length / Q.per)), sp = Math.min(Q.dy, 2 * Q.r);
+  if (!E.prod.cathode.floats) return { c0: V.floorY + Q.r, sp };
+  return { c0: Math.max(V.floorY + Q.r, Math.min(poolBottom(ctx, st) + sp / 2, V.rim - Q.r - (n - 1) * sp)), sp };   // its lowest layer sits a little into the ions, as a floating liquid does
+}
+// The liquid to draw as a clear region (S8 U1): { show 0–1, top: its surface / pm, ions: the ions' surface / pm },
+// or null in a vessel with no surface. It shows as the melt flows (the lattice's hold goes), and goes when it freezes.
+function liquidLevelPm(ctx, pose) {
+  const V = ctx.vessel;
+  if (!V || V.surface == null || !ctx.pool) return null;
+  if (pose.elec) return { show: 1, top: pose.elec.surfaceY, ions: pose.elec.ionTop };
+  return { show: circuitState(ctx, pose) === 'liquid' ? meltAt(pose.meltS || 0) : 0, top: V.surface, ions: V.surface };
+}
+function poolBottom(ctx, st) { return st.ionTop; }   // a floating pool lies on the ions' surface; with no ions left, on the floor
+// The negative (+1: positive) ion nearest its electrode and touching it, that is not already crossing: { k, via }
+// (via: the metal atom of the cathode it touches, or −1); k = −1 if none.
+function touchingIon(ctx, st, sign) {
+  const E = elecSetup(ctx), S = st.S, P = S.P, tol = ELEC_TOUCH * ctx.setup.rMean, W = ctx.vessel.inner, metal = sign > 0 ? cathodeMetal(ctx, st) : [];
+  let best = -1, bx = Infinity, via = -1;
+  for (let k = 0; k < E.U; k++) {
+    if (E.sign[k] !== sign || st.kind[k] !== EL_ION || st.busy[k]) continue;
+    const gap = W + sign * P[k * 3] - S.rho[k];   // its distance from the electrode it is drawn to: (+) at x = W, (−) at x = −W
+    if (gap <= tol && gap < bx) { bx = gap; best = k; via = -1; }
+    for (const m of metal) {
+      const g2 = Math.hypot(P[k * 3] - P[m * 3], P[k * 3 + 1] - P[m * 3 + 1], P[k * 3 + 2] - P[m * 3 + 2]) - S.rho[k] - S.rho[m];
+      if (g2 <= tol && g2 < bx) { bx = g2; best = k; via = m; }
+    }
+  }
+  return { k: best, via };
+}
+// One step of ELEC_DT at this voltage. Changes st; pure otherwise (the same history gives the same states).
+function electrolysisStep(ctx, st, volts) {
+  const E = elecSetup(ctx), S = st.S, U = E.U, v = voltsU(volts), d = ctx.d, rhoLiq = ctx.setup.rhoLiq, P = S.P, Vel = S.Vel;
+  st.P0.set(P); st.ringPrev = st.ring;
+  // the field: each ion is pushed toward the electrode of opposite charge, ELEC_PUSH_G × its weight at full voltage
+  const push = ELEC_PUSH_G * E.g * v;
+  for (let k = 0; k < U; k++) { S.acc[k * 3] = st.kind[k] === EL_ION && !st.busy[k] ? -E.sign[k] * push : 0; S.acc[k * 3 + 1] = S.acc[k * 3 + 2] = 0; }
+  // a positive and a negative ion that touch, each pushed into the other, slide round each other (without it hard
+  // spheres pushed opposite ways lock solid): each is pushed sideways, away from the line between them
+  if (push > 0) for (let a = 0; a < U; a++) {
+    if (st.kind[a] !== EL_ION || E.sign[a] > 0 || st.busy[a]) continue;
+    for (let c = 0; c < U; c++) {
+      if (st.kind[c] !== EL_ION || E.sign[c] < 0 || st.busy[c]) continue;
+      const dx = P[c * 3] - P[a * 3], dy = P[c * 3 + 1] - P[a * 3 + 1], dz = P[c * 3 + 2] - P[a * 3 + 2], D = S.rho[a] + S.rho[c];
+      if (dx <= 0 || dx * dx + dy * dy + dz * dz > 1.1 * D * D) continue;   // the anion (pushed to +x) is not behind the cation
+      let ly = -dy, lz = -dz, l = Math.hypot(ly, lz);
+      if (l < 1e-6 * D) { const th = 2 * Math.PI * hash01(77003 + a * 131 + c); ly = Math.cos(th); lz = Math.sin(th); l = 1; }
+      const f = ELEC_SLIP * push * dx / Math.sqrt(dx * dx + dy * dy + dz * dz) / l;
+      S.acc[a * 3 + 1] += ly * f; S.acc[a * 3 + 2] += lz * f; S.acc[c * 3 + 1] -= ly * f; S.acc[c * 3 + 2] -= lz * f;
+    }
+  }
+  // an ion that has become an atom takes its atom's size
+  for (let k = 0; k < U; k++) if ((st.kind[k] === EL_ATOM || st.kind[k] === EL_METAL) && st.grow[k] < 1) {
+    st.grow[k] = Math.min(1, st.grow[k] + 1 / ELEC_GROW); S.rho[k] = lerp(rhoLiq[k], E.size[k], st.grow[k]);
+  }
+  // a metal atom is pushed up only as far as it is under the surface of the ions: it floats on them
+  for (let k = 0; k < U; k++) if (st.kind[k] === EL_METAL) {
+    const r = S.rho[k], under = clamp((st.ionTop - (P[k * 3 + 1] - r)) / (2 * r), 0, 1);
+    S.grav[k] = E.g * (1 - METAL_LIFT * E.lift * under);
+  }
+  // the liquid keeps out of the bubbles in it
+  S.obst = [];
+  for (const b of st.bubbles) if (b.burst === null) { const c = [0, 0, 0], R = bubbleAt(ctx, st, b, st.n, c); S.obst.push({ c, R }); }
+  S.step(ELEC_SEED + 2 * st.n + 1, 1); S.step(ELEC_SEED + 2 * st.n + 2, 1);
+  // an ion that is giving or taking an electron, and an atom waiting at the anode, stay where they are
+  for (let k = 0; k < U; k++) if (st.busy[k] || st.kind[k] === EL_ATOM && E.sign[k] < 0) { Vel[k * 3] = Vel[k * 3 + 1] = Vel[k * 3 + 2] = 0; }
+  // the electrons crossing: each moves on one tick; so does the ring, once for each
+  let ticks = 0;
+  for (const tr of st.transfers) {
+    st.ticks[tr.an]++; st.ticks[tr.cat]++; st.ring++; tr.k++; ticks++;
+    if (tr.k < ELEC_TICKS) continue;
+    st.busy[tr.an] = st.busy[tr.cat] = 0;
+    if (st.ticks[tr.an] === E.prod.anode.electrons * ELEC_TICKS) { st.kind[tr.an] = EL_ATOM; st.waiting.push(tr.an); S.charge[tr.an] = 0; }   // oxidation: it has lost all its charge
+    if (st.ticks[tr.cat] === E.prod.cathode.electrons * ELEC_TICKS) { st.kind[tr.cat] = EL_METAL; S.charge[tr.cat] = 0; }   // reduction: it has gained all its charge
+  }
+  st.transfers = st.transfers.filter(tr => tr.k < ELEC_TICKS);
+  // a metal atom that has reached the surface (or the floor) joins the pool
+  for (let k = 0; k < U; k++) {
+    if (st.kind[k] !== EL_METAL) continue;
+    if (st.metalAt === undefined) st.metalAt = new Int32Array(U).fill(-1);
+    if (st.metalAt[k] < 0) st.metalAt[k] = st.n;
+    const r = S.rho[k], y = P[k * 3 + 1], there = E.prod.cathode.floats ? y + r >= st.ionTop - r : y - r <= S.yLo + r;
+    if (st.grow[k] < 1 || !there && st.n - st.metalAt[k] < POOL_MAX_S / ELEC_DT) continue;
+    st.kind[k] = EL_POOL; S.skip[k] = 1; st.pool.push(k); st.poolFrom[k] = [P[k * 3], y, P[k * 3 + 2]]; st.poolBorn[k] = st.n;
+    if (!E.prod.cathode.floats) S.yLo = ctx.vessel.floorY + poolDepth(E, st.pool.length);   // a pool on the floor raises the ions' floor
+  }
+  // the ions' surface (S8 U1): as high as what is left in the liquid fills the floor (or the pool on it), packed as the melt was;
+  // it is their ceiling, and a floating pool lies on it
+  let vLeft = 0, rBig = 0;
+  for (let k = 0; k < U; k++) if (!S.skip[k]) { vLeft += 4 / 3 * Math.PI * Math.pow(S.rho[k], 3); rBig = Math.max(rBig, S.rho[k]); }
+  st.ionTop = S.yLo + vLeft / (E.fill * E.area);
+  S.yHi = Math.max(st.ionTop, rBig ? S.yLo + ION_ROOM * 2 * rBig : -Infinity);   // never so thin the last few ions cannot pass each other
+  st.last = { inE: ticks / ELEC_TICKS, outE: ticks / ELEC_TICKS };
+  // the next electrons: the cell drives them at a rate set by the voltage, when an ion at each electrode can take part
+  st.budget = Math.min(1, st.budget + ELEC_RATE * v * ELEC_DT);
+  while (st.budget >= 1) {
+    const an = touchingIon(ctx, st, -1).k, c = touchingIon(ctx, st, 1), cat = c.k;
+    if (an < 0 || cat < 0) break;
+    st.transfers.push({ an, cat, via: c.via, k: 0 }); st.busy[an] = st.busy[cat] = 1; st.budget -= 1;
+  }
+  // two atoms at the anode join as a molecule, which moves into a bubble
+  while (st.waiting.length >= 2) {
+    const a = st.waiting.shift(), b = st.waiting.shift(), m = st.mols.length;
+    const from = [0, 1, 2].map(q => (P[a * 3 + q] + P[b * 3 + q]) / 2);
+    let bub = st.bubbles[st.bubbles.length - 1];
+    if (!bub || bub.released !== null || bub.mols.length >= BUBBLE_MOLS) {
+      const R = bubbleR(E, BUBBLE_MOLS), V = ctx.vessel;
+      bub = { mols: [], born: st.n, y0: clamp(from[1], V.floorY + R, Math.max(V.floorY + R, st.surfaceY - R)), z0: clamp(from[2], -V.innerZ + R, V.innerZ - R), released: null, burst: null, done: false };
+      st.bubbles.push(bub);
+    }
+    st.mols.push({ a, b, born: st.n, from, bubble: st.bubbles.indexOf(bub) }); bub.mols.push(m);
+    st.kind[a] = st.kind[b] = EL_MOL; S.skip[a] = S.skip[b] = 1;
+  }
+  // a full bubble lets go once its last molecule is in; it rises up the anode and bursts at the surface;
+  // its molecules rise away and are gone
+  for (const b of st.bubbles) {
+    if (b.done) continue;
+    if (b.released === null && st.n - st.mols[b.mols[b.mols.length - 1]].born >= BUBBLE_JOIN && (b.mols.length >= BUBBLE_MOLS || st.n - b.born >= BUBBLE_WAIT_S / ELEC_DT)) b.released = st.n;   // full, or it has waited long enough
+    if (b.released !== null && b.burst === null) { bubbleAt(ctx, st, b, st.n, _bc); if (_bc[1] >= st.surfaceY) b.burst = st.n; }
+    if (b.burst !== null && st.n - b.burst >= GAS_SETTLE) { b.done = true; for (const m of b.mols) st.kind[st.mols[m].a] = st.kind[st.mols[m].b] = EL_GAS; }
+  }
+  // the liquid's top: the ions' surface, or the top of the pool that floats on it (the gas space is above it)
+  st.surfaceY = Math.max(st.ionTop, E.prod.cathode.floats && st.pool.length ? (Y => Y.c0 + (Math.ceil(st.pool.length / E.pool.per) - 1) * Y.sp + E.pool.r)(poolLayers(ctx, st)) : -Infinity);
+  // the current: the rate at which electrons cross, smoothed
+  st.current += (ticks / ELEC_TICKS / ELEC_DT - st.current) * (1 - Math.exp(-ELEC_DT / ELEC_CURRENT_S));
+  if (st.current < ELEC_CURRENT_OFF * ELEC_RATE) st.current = 0;   // B36: it falls to nothing, so the bulb goes off
+  st.n++;
+  return st;
+}
+// Drawing the electrolysis at a share f of the way through its last step (Layer 4 steps it at ELEC_DT and draws
+// between steps). Where site i is / pm:
+function electrolysisSitePm(ctx, st, i, f, out) {
+  const E = elecSetup(ctx), k = E.liq.unitOfSite[i], kind = st.kind[k];
+  if (kind === EL_MOL || kind === EL_GAS) {
+    const m = st.mols.findIndex(M => M.a === k || M.b === k);
+    moleculeAtomPm(ctx, st, m, st.mols[m].b === k ? 1 : 0, st.n - 1 + f, out);
+    return out;
+  }
+  if (kind === EL_POOL) {   // it settles into its place in the pool, and wanders there (a liquid)
+    const t = st.n - 1 + f, s = easeInOut(clamp((t - st.poolBorn[k]) / POOL_JOIN, 0, 1)), A = POOL_WOBBLE * E.pool.sp, TAU = 2 * Math.PI, h = q => hash01(50021 + k * 5 + q);
+    poolSlotPm(ctx, st, st.pool.indexOf(k), out);
+    for (let q = 0; q < 3; q++) out[q] = lerp(st.poolFrom[k][q], out[q] + A * Math.sin(TAU * (0.3 + 0.3 * h(q)) * t * ELEC_DT + TAU * h(q + 3)), s);
+    return out;
+  }
+  for (let q = 0; q < 3; q++) out[q] = lerp(st.P0[k * 3 + q], st.S.P[k * 3 + q], f);
+  return out;
+}
+// Its drawn size, × its ion's: an ion 1; an atom its own size (as it grows); a molecule as it fades; gone 0.
+function electrolysisScale(ctx, st, i, f) {
+  const E = elecSetup(ctx), k = E.liq.unitOfSite[i], kind = st.kind[k];
+  if (kind === EL_ION) return 1;
+  if (kind === EL_MOL || kind === EL_GAS) {
+    const m = st.mols.findIndex(M => M.a === k || M.b === k);
+    return E.size[k] / ctx.setup.rhoLiq[k] * moleculeAtomPm(ctx, st, m, 0, st.n - 1 + f, _ms);
+  }
+  return kind === EL_POOL ? E.size[k] / ctx.setup.rhoLiq[k] : st.S.rho[k] / ctx.setup.rhoLiq[k];
+}
+const _ms = [0, 0, 0];
+// The molecules' bonds [site, site, order, how much is left], the bubbles in the melt, and the electrons
+// crossing between an ion and its electrode, for Layer 4 to draw.
+function electrolysisBonds(ctx, st, f = 1) {
+  const E = elecSetup(ctx);
+  return st.mols.filter(M => st.kind[M.a] === EL_MOL || st.kind[M.a] === EL_GAS).map(M => [E.site[M.a], E.site[M.b], E.prod.anode.order, moleculeAtomPm(ctx, st, st.mols.indexOf(M), 0, st.n - 1 + f, _ms)]);
+}
+function electrolysisBubbles(ctx, st, f) {
+  return st.bubbles.filter(b => b.burst === null).map(b => { const c = [0, 0, 0], R = bubbleAt(ctx, st, b, st.n - 1 + f, c); return { c, R }; });
+}
+function electrolysisSparks(ctx, st, f) {
+  const W = ctx.vessel.inner, out = [], a = [0, 0, 0], c = [0, 0, 0], E = elecSetup(ctx);
+  for (const tr of st.transfers) {
+    const p = clamp((tr.k + f) / ELEC_TICKS, 0, 1);
+    electrolysisSitePm(ctx, st, E.site[tr.an], f, a); electrolysisSitePm(ctx, st, E.site[tr.cat], f, c);
+    out.push([lerp(a[0], W, p), a[1], a[2]]);   // into the anode
+    if (tr.via < 0) out.push([lerp(-W, c[0], p), c[1], c[2]]);   // out of the cathode into the ion …
+    else { const m = electrolysisSitePm(ctx, st, E.site[tr.via], f, [0, 0, 0]); out.push([lerp(m[0], c[0], p), lerp(m[1], c[1], p), lerp(m[2], c[2], p)]); }   // … or out of its liquid metal
+  }
+  return out;
+}
+// How far the ring of electrons in the wire has moved / pm: one place (gapPm) per electron that has crossed.
+function electrolysisRingPm(ctx, pose) {
+  const st = pose.elec, f = pose.elecF === undefined ? 1 : pose.elecF;
+  return st ? lerp(st.ringPrev, st.ring, f) / ELEC_TICKS * ctx.circuit.gapPm : 0;
+}
+// Is the melt in the crucible one whose ions carry the current (so the wire's electrons move only with the
+// electrolysis, never crowd)? How far it has let go of the lattice, 0 … 1.
+function ionMeltShare(ctx, pose) { return electrolysisReady(ctx) && pose.meltS > 0 && circuitState(ctx, pose) === 'liquid' ? meltAt(pose.meltS) : 0; }
 
 // Where a sea electron is drawn / pm. In a press it moves with the layers
 // on its side of the slip plane (blended across a thin band, so it never
@@ -3104,7 +3762,7 @@ function seaPositionPm(ctx, pose, sea, e, tSec, out) {
   seaThermalPm(sea, e, tSec, out);
   if (!ctx || !pose) return out;
   if (pose.flowS > 0 && ANIMATIONS[ctx.key].kind === 'heat') return liquidElectronPm(ctx, pose, sea, e, tSec, out);
-  if (ctx.circuit && ctx.circuit.conducts && !e.ball) return seaFlowPm(ctx, pose, sea, e, tSec, out);
+  if (ctx.circuit && ctx.circuit.conducts && !e.ball) return pose.meltS > 0 && ctx.pool ? meltSeaPm(ctx, pose, sea, e, tSec, out) : seaFlowPm(ctx, pose, sea, e, tSec, out);
   if (e.ball) {
     siteOffsetPm(ctx, pose, e.site, _so);
     if (ctx.spin && ctx.upper[e.site] && (pose.drift || pose.crowd)) {   // it turns with its ball: as itself, not as the atom it came from
@@ -3155,11 +3813,16 @@ const approach = (v, to, step) => v + clamp(to - v, -step, step);
 const VOLT_MAX = 12, VOLT_SLEW = 24, PUSH_SLEW = 1.5, JOSTLE_HZ = 1;
 const voltsU = v => clamp(v / VOLT_MAX, 0, 1);
 const circuitClockStart = () => DRIFT_RAMP_S;
-function circuitLivePose(ctx, volts, clockS, tSec) {
+// The tool's temperature dial (S8): tempC, and meltS, the melt's liquid clock (as the Melting point
+// tool's): 0 until the model melts in its crucible.
+// elec: the electrolysis's state (S8 session 3), drawn a share elecF of the way through its last step.
+function circuitLivePose(ctx, volts, clockS, tSec, tempC = ctx.startC, meltS = 0, elec = null, elecF = 1) {
   const p = restPose(ctx), v = voltsU(volts);
-  p.volts = volts; p.flowS = clockS;
+  p.volts = volts; p.flowS = clockS; p.tempC = tempC;
+  if (ctx.pool && meltS > 0) { p.meltS = meltS; p.drift = meltAt(meltS); }   // the weak forces are overcome as the lattice lets go
+  if (elec && electrolysisCanRun(ctx, p.meltS) && tempC > ctx.s.mpC) { p.elec = elec; p.elecF = elecF; }
   if (ctx.circuit.conducts) { p.flow = 1; p.current = 1; }
-  else { p.flow = v; p.jostle = v * (1 - Math.cos(2 * Math.PI * JOSTLE_HZ * tSec)) / 2; }
+  else { p.flow = v; p.jostle = v * (1 - Math.cos(2 * Math.PI * JOSTLE_HZ * tSec)) / 2 * (1 - ionMeltShare(ctx, p)); }
   return p;
 }
 // Hardness or strength. The slider moves the plate, as a hand does; the rest follows from where the
@@ -3395,6 +4058,8 @@ if (typeof module !== 'undefined' && module.exports) {
     BOND_BREAK, SNAP_HOLD, LAYER_SLIDES, SHEET_BEND, CRUMBLE_SLIDE, unitDirections, sagAt, bondStrength, bondGlowOf, weakLinks, STICKS, dashSegments, thermometerNote, seaFade,
     OVERCOME_S, MELT_RAMP_S, LIQUID_S, SLIDER_PAST_MELT, meltSpeed, meltPose, DISH_W, GAS_SPREAD, meltAt, liquidClockS, liquidFor, liquidSitePm, liquidPointPm, liquidSetup, liquidVessel,
     createPlayer, advancePlayer, playerNext, playerBack, playerReplay, playerDone,
+    circuitMelts, circuitTemperatureRange, toolTemperatureRange, crucibleVessel, CRUCIBLE_RIM, liquidTauS, meltSeaPm, circuitState, electrolysisCurrent, poolBox,
+    liquidStepper, poolBottom, poolDepth, poolLayers, ELEC_DT, ELEC_RATE, ELEC_TICKS, ELEC_PUSH_G, BUBBLE_MOLS, GAS_SETTLE, GAS_SPEED_D, gasWanderPm, liquidLevelPm, CRUCIBLE_GAS, LIQ_PACK, LIQ_PACK_ROT, EL_ION, EL_ATOM, EL_METAL, EL_MOL, EL_GAS, EL_POOL, poolSlotPm, electrolysisReady, electrolysisCanRun, elecSetup, electrolysisStart, electrolysisStep, bubbleAt, moleculeAtomPm, electrolysisSitePm, electrolysisScale, electrolysisBonds, electrolysisBubbles, electrolysisSparks, electrolysisRingPm, ionMeltShare,
   });
 }
 </script>
@@ -3444,7 +4109,11 @@ function liveBox(ctx) {
   return { min: [Math.min(-h, a.tipX - a.maxLen), -h, -h], max: [h, h, h] };
 }
 // How bright the bulb is: the rule decides whether it can light (bulbLit), the voltage how brightly.
-const liveBulb = (ctx, volts) => bulbLit(ctx, { current: 1 }) * voltsU(volts);
+// A melt of ions (S8 session 3): the current is the rate of discharge (electrolysisCurrent), which the voltage already sets.
+const liveBulb = (ctx, volts, tempC = ctx.startC, elec = null) => {
+  const p = { current: 1, tempC, elec }, lit = bulbLit(ctx, p);
+  return conductivity(ctx.s, circuitState(ctx, p)).carrier === 'ions' ? lit : lit * voltsU(volts);
+};
 const bulbWord = lit => lit <= 0 ? 'off' : lit < 0.34 ? 'dim' : lit < 0.75 ? 'on' : 'bright';
 // Everything a press can reach; the view flies out to it when something first moves.
 function pressReachBox(ctx) {
@@ -3470,10 +4139,12 @@ function whyText(ctx, st) {
     let left = st.tau || 0;
     beats = A.bends ? A.beats.filter(b => b.changes !== 'force' || b === push[0]).slice(0, 3) : left > 0 ? after.filter(b => { const on = left > 0; left -= b.dur; return on; }) : push;
   } else if (A.kind === 'heat') beats = st.tempC > s.mpC ? A.beats.slice(1) : A.beats.slice(0, 1);
+  else if (st.tempC > s.mpC && circuitMelts(s)) return moltenCircuitText(s);   // the Conductivity tool's melt (S8)
   else beats = st.volts > 0 ? A.beats.slice(1) : A.beats.slice(0, 1);
   const text = [...new Set(beats.map(b => beatCaption(s, step, b)))].join(' ');
   const note = A.kind === 'circuit' && st.volts > 0 && beats.find(b => b.note);
-  return text + (note ? '\n' + BEAT_TEXT[note.note] : '');
+  const stop = A.kind === 'circuit' && st.tempC !== undefined && !circuitMelts(s) && st.tempC >= circuitTemperatureRange(s).max;   // decision E
+  return text + (note ? '\n' + BEAT_TEXT[note.note] : '') + (stop ? '\n' + dialStopText(s) : '');
 }
 // A property done: its tick, for this visit only (nothing is saved).
 const doneAfter = J => Object.assign({}, J.done, { [STEPS[J.idx]]: true });
@@ -3616,8 +4287,8 @@ function homeShape(portrait) {
 // Compare's four suggested pairs (decision A).
 const COMPARE_PAIRS = [['diamond', 'graphite'], ['NaCl', 'I2'], ['Fe', 'highCSteel'], ['graphite', 'graphene']];
 // One dial for several substances: from the lowest start to the highest top.
-function sharedRange(subs) {
-  const r = subs.map(temperatureRange);
+function sharedRange(subs, kind = 'heat') {
+  const r = subs.map(s => toolTemperatureRange(s, kind));
   return { min: Math.min(...r.map(x => x.min)), max: Math.max(...r.map(x => x.max)), start: Math.min(...r.map(x => x.start)) };
 }
 // What a heated model shows, beyond its own dial: once melted it says when, not "liquid" at any
@@ -3627,7 +4298,7 @@ function heatReading(s, tC) {
   return (s.turnsToGas ? 'turned to gas at ' : 'melted at ') + fmtC(s.mpC);
 }
 // Above its own dial a model is drawn as at the top of its own dial: still melted, flowing at full speed.
-function paneTempC(s, tC) { return Math.min(tC, temperatureRange(s).max); }
+function paneTempC(s, tC, kind = 'heat') { return Math.min(tC, toolTemperatureRange(s, kind).max); }
 // The shared push (the plan's tools table). Until a solid gives way the force is the plate's travel ÷
 // forceSquash (a spring squash; a sheet also sags as it is squashed). The slider f (0 … 1) is that travel
 // in forceSquashes, the same for every model, so every spring pushes equally hard until its solid gives
@@ -4102,7 +4773,7 @@ function glowMaterial(T) {
 }
 // A heat animation draws the glow; everything else the plain background.
 function syncBackground(tC) {
-  const bg = App.bg, heat = Anim.key && ANIMATIONS[Anim.key].kind === 'heat';
+  const bg = App.bg, heat = !!(Anim.key && Anim.ctx && Anim.ctx.heater);   // the heater's, or the Conductivity tool's dial (S8)
   if (!bg.userData.plain) bg.userData.plain = bg.material;
   if (heat && !bg.userData.glow) bg.userData.glow = glowMaterial(App.T);
   const m = heat ? bg.userData.glow : bg.userData.plain;
@@ -4274,10 +4945,12 @@ function placeIons(tSec) {
   if (stretch) stretchBonds(App.stretch, tSec, BOND_STRETCH, P, App.pos);
   for (const mesh of App.meshes) {
     const { idx, r, role } = mesh.userData;
-    const rr = r * (!pose ? 1 : role === 'interstitial' ? 1 + 0.6 * pose.atomGlow : 1 + 0.3 * pose.glow);
+    const rr = r * (!pose ? 1 : role === 'interstitial' ? 1 + 0.6 * pose.atomGlow : 1 + 0.3 * pose.glow), el = pose && pose.elec && Anim.ctx.pool ? pose.elec : null;
     for (let j = 0; j < idx.length; j++) {
-      const i = idx[j];
-      _m4.makeScale(rr, rr, rr);
+      const i = idx[j], ri = el ? rr * electrolysisScale(Anim.ctx, el, i, pose.elecF) : rr;   // an ion that has become an atom is drawn at the atom's size (S8)
+      if (App.atomR) App.atomR[i] = el && el.kind[elecSetup(Anim.ctx).liq.unitOfSite[i]] !== EL_ION ? ri : 0;
+      if (App.atomR && App.atomR[i]) { _m4.makeScale(0, 0, 0); mesh.setMatrixAt(j, _m4); continue; }   // … in the atom's own colour (drawElectrolysis)
+      _m4.makeScale(ri, ri, ri);
       _m4.setPosition(App.pos[i * 3], App.pos[i * 3 + 1], App.pos[i * 3 + 2]);
       mesh.setMatrixAt(j, _m4);
     }
@@ -4561,14 +5234,17 @@ function setGlass(mode) {
 // "delocalised" or "intermolecular" would hand over an answer the pupil has to write.
 function paintKey() {
   const words = J.mode === 'explore';
-  document.getElementById('legend').innerHTML = keyHTML(App.key, words);
+  // once ions are discharged, their atoms join the key, each in the atom's own colour (S8 U1)
+  const atoms = Tool.elec && !multi() ? [App.s.ions.cation.el, App.s.ions.anion.el].map(el => ({ draw: 'ball', el, atom: true, words: cap(ELEMENTS[el].name) + ' atom' })) : [];
+  document.getElementById('legend').innerHTML = keyHTML(App.key.concat(atoms), words);
+  App.keyAtoms = atoms.length > 0;
 }
 function keyHTML(entries, words) {
   const charge = q => '<sup>' + (Math.abs(q) === 1 ? '' : Math.abs(q)) + (q > 0 ? '+' : '−') + '</sup>';
   const swatch = (hex, dash) => '<svg viewBox="0 0 22 12" aria-hidden="true"><path d="M1 6h20" stroke="' + hex + '" stroke-width="' + (dash ? '2.5" stroke-dasharray="4 3' : '4" stroke-linecap="round') + '"/></svg>';
   return entries.filter(e => words || e.draw === 'ball' || e.draw === 'electron').map(e => {
     const sym = e.draw === 'ball' ? e.el + (e.charge ? charge(e.charge) : '') : e.draw === 'electron' ? 'e<sup>−</sup>' : '';
-    const pic = e.draw === 'bond' ? swatch('#c9ced8') : e.draw === 'weak' ? swatch(STICKS.weakHex, true) : '<i style="background:' + (e.draw === 'electron' ? ELECTRON_GEM.hex : ELEMENTS[e.el].hex) + '"></i>';
+    const pic = e.draw === 'bond' ? swatch('#c9ced8') : e.draw === 'weak' ? swatch(STICKS.weakHex, true) : '<i style="background:' + (e.draw === 'electron' ? ELECTRON_GEM.hex : e.atom ? atomHex(e.el) : ELEMENTS[e.el].hex) + '"></i>';
     return '<span>' + pic + (words ? '<span class="kw">' + e.words + '</span>' : '') + (sym ? '<span class="sym">' + sym + '</span>' : '') + '</span>';
   }).join('');
 }
@@ -4786,15 +5462,15 @@ function flyForAnimation() {
 }
 
 // ---- the play tools (UI round 3): a control sets the pose; nothing plays by itself ----
-const Tool = { kind: null, volts: 0, voltsShown: 0, clock: 0, push: 0, pushShown: 0, press: pressStart(), tempC: 25, tau: 0, shown: '' };
+const Tool = { kind: null, volts: 0, voltsShown: 0, clock: 0, push: 0, pushShown: 0, press: pressStart(), tempC: 25, tau: 0, elec: null, elecAcc: 0, shown: '' };
 function openTool(kind) {
   if (!multi()) Usage.did('tool', App.s.key, KIND_STEP[kind]);   // decision K: Compare and Trends record nothing new
   stopAnimation();
   Tool.kind = kind;
   Anim.key = animationFor(App.s, KIND_STEP[kind]); Anim.step = KIND_STEP[kind]; Anim.startC = toolRange().start; Anim.carry = 0; Anim.lastFlow = 0; Anim.player = null; Anim.live = true; Anim.boxOut = false;
-  Object.assign(Tool, { volts: 0, voltsShown: 0, clock: circuitClockStart(), push: 0, pushShown: 0, press: pressStart(), tempC: Anim.startC, tau: 0, shown: '' });
+  Object.assign(Tool, { volts: 0, voltsShown: 0, clock: circuitClockStart(), push: 0, pushShown: 0, press: pressStart(), tempC: Anim.startC, tau: 0, elec: null, elecAcc: 0, shown: '' });
   buildAnimObjects();
-  if (kind === 'heat') liquidFor(Anim.ctx);   // worked out now, while the camera flies in
+  if (kind === 'heat' || Anim.ctx.pool) liquidFor(Anim.ctx);   // worked out now, while the camera flies in
   Anim.box = liveBox(Anim.ctx);
   renderToolCtl();
   advanceTool(0);
@@ -4827,7 +5503,22 @@ function advanceTool(dtS) {
   if (Tool.kind === 'circuit') {
     Tool.voltsShown = approach(Tool.voltsShown, Tool.volts, VOLT_SLEW * dtS);
     Tool.clock += dtS * voltsU(Tool.voltsShown);
-    Anim.pose = circuitLivePose(c, Tool.voltsShown, Tool.clock, simTime(App.clock));
+    const tC = paneTempC(App.s, Tool.tempC, 'circuit');   // the dial (S8): the melt's clock runs as the Melting point tool's
+    Tool.tau = c.pool && tC > App.s.mpC ? Tool.tau + dtS * meltSpeed(App.s, tC) : 0;
+    // the electrolysis (S8 session 3): it starts when the voltage first drives the whole melt, then runs in fixed steps
+    // of ELEC_DT. Cooled back to a solid, the model is the solid block again.
+    if (!electrolysisCanRun(c, Tool.tau)) { Tool.elec = null; Tool.elecAcc = 0; }
+    else {
+      if (!Tool.elec && Tool.voltsShown > 0) { Tool.elec = electrolysisStart(c, Tool.tau); Tool.elecAcc = 0; }
+      if (Tool.elec) {
+        Tool.elecAcc += dtS;
+        for (let n = 0; Tool.elecAcc >= ELEC_DT && n < ELEC_CATCH_UP; n++) { electrolysisStep(c, Tool.elec, Tool.voltsShown); Tool.elecAcc -= ELEC_DT; }
+        Tool.elecAcc = Math.min(Tool.elecAcc, ELEC_DT);   // after a hidden tab it does not race to catch up
+      }
+    }
+    Anim.pose = circuitLivePose(c, Tool.voltsShown, Tool.clock, simTime(App.clock), tC, Tool.tau, Tool.elec, Tool.elecAcc / ELEC_DT);
+    if (!!App.keyAtoms !== (!!Tool.elec && !multi())) paintKey();
+    showTemperature(Tool.tempC);
   } else if (Tool.kind === 'press') {
     Tool.pushShown = approach(Tool.pushShown, Tool.push, PUSH_SLEW * dtS);
     Tool.press = pressStep(Tool.press, c, multi() ? sharedPushFrac(c, Tool.pushShown, Panes.pushU) : Tool.pushShown, dtS);
@@ -4841,6 +5532,9 @@ function advanceTool(dtS) {
   }
   if (!multi()) updateToolCtl();   // with several models, once a frame (framePanes)
 }
+const ELEC_CATCH_UP = 8;   // electrolysis steps at most in one frame
+// Reset in the Conductivity tool (decision D): the melt is full again; nothing else refills it.
+function resetMelt() { Object.assign(Tool, { elec: null, elecAcc: 0 }); renderToolCtl(); }
 function resetPress() { Object.assign(Tool, { push: 0, pushShown: 0, press: pressStart() }); Anim.boxOut = false; Anim.box = liveBox(Anim.ctx); renderToolCtl(); flyForAnimation(); }
 // The slider's track is filled to the knob.
 function fillRange(r) { r.style.setProperty('--p', 100 * (r.value - r.min) / (r.max - r.min) + '%'); }
@@ -4853,35 +5547,42 @@ function renderToolCtl() {
   const reading = (label, id) => '<div class="ctlRow"><span class="ctlLbl">' + label + '</span><span class="ctlVal" id="' + id + '"' + (id === 'ctlBulb' ? ' aria-live="polite"' : '') + '></span></div>';
   const range = (max, step, v) => '<input type="range" id="ctlRange" min="0" max="' + max + '" step="' + step + '" value="' + v + '">';
   // With several models each one's bulb and force is shown on the model itself (S6).
-  el.innerHTML = k === 'circuit' ? head('Voltage', 'Drag the slider', 'ctlRange') + range(VOLT_MAX, 0.5, Tool.volts) + '<div class="ctlReads">' + reading('Battery', 'ctlVal') + (multi() ? '' : reading('Bulb', 'ctlBulb')) + '</div>'
+  const dial = head('Temperature', 'Drag round the dial') + '<svg id="dial" viewBox="0 0 118 118" role="slider" tabindex="0" aria-label="Temperature in degrees Celsius"></svg>';
+  el.innerHTML = k === 'circuit' ? '<div class="ctlPart">' + head('Voltage', 'Drag the slider', 'ctlRange') + range(VOLT_MAX, 0.5, Tool.volts) + '<div class="ctlReads">' + reading('Battery', 'ctlVal') + (multi() ? '' : reading('Bulb', 'ctlBulb')) + '<button id="ctlReset" hidden>Reset the model</button></div></div>' +
+      '<div class="ctlPart">' + dial + '</div>'
     : k === 'press' ? head('Push', 'Drag the slider', 'ctlRange') + range(100, 0.5, Tool.push * 100) + '<div class="ctlReads">' + (multi() ? '' : reading('Force', 'ctlVal')) + '<button id="ctlReset" hidden>Reset the model</button></div>'
-    : k === 'heat' ? head('Temperature', 'Drag round the dial') + '<svg id="dial" viewBox="0 0 118 118" role="slider" tabindex="0" aria-label="Temperature in degrees Celsius"></svg>' : '';
+    : k === 'heat' ? dial : '';
   const r = document.getElementById('ctlRange');
   if (r) fillRange(r);
-  if (k === 'heat') attachDial(document.getElementById('dial'));
+  if (k === 'heat' || k === 'circuit') attachDial(document.getElementById('dial'));
 }
 function updateToolCtl() {
   const k = Tool.kind, r = toolRange(), stopped = multi() ? Panes.anyStop : Tool.press.stop;
-  const force = k === 'press' ? forceMeterValue(pressContact(Anim.ctx, Tool.press).force) : 0, key = k + '/' + Tool.volts + '/' + Tool.voltsShown + '/' + force + '/' + stopped + '/' + Tool.tempC;
+  const lit = k === 'circuit' ? liveBulb(Anim.ctx, Tool.voltsShown, paneTempC(App.s, Tool.tempC, 'circuit'), Tool.elec) : 0, elecOn = multi() ? Panes.anyElec : !!Tool.elec;   // the melt's bulb follows its discharge (S8)
+  const force = k === 'press' ? forceMeterValue(pressContact(Anim.ctx, Tool.press).force) : 0, key = k + '/' + Tool.volts + '/' + Tool.voltsShown + '/' + force + '/' + stopped + '/' + Tool.tempC + '/' + bulbWord(lit) + '/' + elecOn;
   if (key === Tool.shown) return;
   Tool.shown = key;
   if (k === 'circuit') {
     document.getElementById('ctlVal').textContent = Tool.volts.toFixed(Tool.volts % 1 ? 1 : 0) + ' V';
-    const lit = liveBulb(Anim.ctx, Tool.voltsShown), b = document.getElementById('ctlBulb');
+    const b = document.getElementById('ctlBulb');
     if (b) { b.textContent = bulbWord(lit); b.classList.toggle('lit', lit > 0); }
+    document.getElementById('ctlReset').hidden = !elecOn;   // once a melt has been electrolysed, Reset refills it (decision D)
+    drawDial(document.getElementById('dial'), r);
   } else if (k === 'press') {
     const v = document.getElementById('ctlVal');
     if (v) v.textContent = force;
     document.getElementById('ctlReset').hidden = !stopped;
-  } else if (k === 'heat') {
-    const d = document.getElementById('dial'), f = (Tool.tempC - r.min) / (r.max - r.min), R = 44, C = 2 * Math.PI * R, arc = C * DIAL_SWEEP / 360, a = dialAngle(Tool.tempC, r.min, r.max) * DEG;
-    d.innerHTML = '<g transform="rotate(135 59 59)"><circle cx="59" cy="59" r="' + R + '" fill="none" stroke="rgba(255,255,255,.26)" stroke-width="11" stroke-dasharray="' + arc + ' ' + C + '" stroke-linecap="round"/>' +
-      '<circle cx="59" cy="59" r="' + R + '" fill="none" stroke="#ff7a59" stroke-width="11" stroke-dasharray="' + arc * f + ' ' + C + '" stroke-linecap="round"/></g>' +
-      '<circle cx="' + (59 + R * Math.sin(a)) + '" cy="' + (59 - R * Math.cos(a)) + '" r="13" fill="#fff" style="stroke:var(--tool);stroke-width:3"/>' +
-      '<text x="59" y="60" text-anchor="middle">' + thermometerText(Tool.tempC) + '</text><text class="st" x="59" y="78" text-anchor="middle">' + (multi() ? '' : stateWord(App.s, Tool.tempC)) + '</text>';
-    d.setAttribute('aria-valuemin', r.min); d.setAttribute('aria-valuemax', r.max); d.setAttribute('aria-valuenow', Tool.tempC); d.setAttribute('aria-valuetext', thermometerText(Tool.tempC) + (multi() ? '' : ', ' + stateWord(App.s, Tool.tempC)));
-  }
+  } else if (k === 'heat') drawDial(document.getElementById('dial'), r);
   if (!document.getElementById('whyPop').hidden) showWhy();
+}
+// The temperature dial, in the Melting point tool and (S8) the Conductivity tool.
+function drawDial(d, r) {
+  const f = (Tool.tempC - r.min) / (r.max - r.min), R = 44, C = 2 * Math.PI * R, arc = C * DIAL_SWEEP / 360, a = dialAngle(Tool.tempC, r.min, r.max) * DEG;
+  d.innerHTML = '<g transform="rotate(135 59 59)"><circle cx="59" cy="59" r="' + R + '" fill="none" stroke="rgba(255,255,255,.26)" stroke-width="11" stroke-dasharray="' + arc + ' ' + C + '" stroke-linecap="round"/>' +
+    '<circle cx="59" cy="59" r="' + R + '" fill="none" stroke="#ff7a59" stroke-width="11" stroke-dasharray="' + arc * f + ' ' + C + '" stroke-linecap="round"/></g>' +
+    '<circle cx="' + (59 + R * Math.sin(a)) + '" cy="' + (59 - R * Math.cos(a)) + '" r="13" fill="#fff" style="stroke:var(--tool);stroke-width:3"/>' +
+    '<text x="59" y="60" text-anchor="middle">' + thermometerText(Tool.tempC) + '</text><text class="st" x="59" y="78" text-anchor="middle">' + (multi() ? '' : stateWord(App.s, Tool.tempC)) + '</text>';
+  d.setAttribute('aria-valuemin', r.min); d.setAttribute('aria-valuemax', r.max); d.setAttribute('aria-valuenow', Tool.tempC); d.setAttribute('aria-valuetext', thermometerText(Tool.tempC) + (multi() ? '' : ', ' + stateWord(App.s, Tool.tempC)));
 }
 function attachDial(d) {
   const go = e => { const b = d.getBoundingClientRect(), r = toolRange(), a = Math.atan2(e.clientX - b.left - b.width / 2, b.top + b.height / 2 - e.clientY) / DEG; Tool.tempC = dialValue(a, r.min, r.max, Tool.tempC); };
@@ -4893,7 +5594,7 @@ function attachDial(d) {
   });
 }
 function showWhy() {
-  const one = () => whyText(Anim.ctx, { tau: Tool.press.tau, tempC: multi() ? paneTempC(App.s, Tool.tempC) : Tool.tempC, volts: Tool.volts }).split('\n').map(x => '<p>' + esc(x) + '</p>').join('');
+  const one = () => whyText(Anim.ctx, { tau: Tool.press.tau, tempC: multi() ? paneTempC(App.s, Tool.tempC, Tool.kind) : Tool.tempC, volts: Tool.volts }).split('\n').map(x => '<p>' + esc(x) + '</p>').join('');
   // several models: each one's own reason, under its name
   document.getElementById('whyPop').innerHTML = multi() ? eachPane(() => '<h3>' + esc(cap(App.s.name)) + '</h3>' + one()).join('') : one();
 }
@@ -4911,7 +5612,7 @@ const PANE_APP = ['s', 'key', 'lattice', 'phases', 'stretch', 'sea', 'meshes', '
 const PANE_SHARED = ['volts', 'push', 'tempC', 'shown'];   // shown: the one control panel's last drawing
 const ANIM_REST = Object.assign({}, Anim), TOOL_REST = Object.assign({}, Tool);
 const PANE_ANIM = Object.keys(ANIM_REST), PANE_TOOL = Object.keys(TOOL_REST).filter(k => !PANE_SHARED.includes(k));
-const Panes = { list: [], cur: -1, mode: null, ctl: {}, pushU: 1, anyStop: false, keys: [] };
+const Panes = { list: [], cur: -1, mode: null, ctl: {}, pushU: 1, anyStop: false, anyElec: false, keys: [] };
 function multi() { return Panes.list.length > 1; }
 function savePane() {
   const p = Panes.list[Panes.cur];
@@ -4939,7 +5640,7 @@ function eachPane(fn) {
   return out;
 }
 const paneSubs = () => multi() ? Panes.list.map((p, i) => i === Panes.cur ? App.s : p.app.s) : [App.s];
-function toolRange() { return multi() ? sharedRange(paneSubs()) : temperatureRange(App.s); }
+function toolRange() { return multi() ? sharedRange(paneSubs(), Tool.kind) : toolTemperatureRange(App.s, Tool.kind); }
 // Trends draws every model to one scale (decision D): the largest distance any one needs.
 function levelPanes() {
   if (!multi() || Panes.mode !== 'trends') return;
@@ -5028,7 +5729,7 @@ function framePanes() {
   stepHand(Math.min(_dtS, MAX_CATCH_UP_S));
   r.setScissorTest(false); r.setClearColor(0x10151e, 1); r.clear();
   r.setScissorTest(true);
-  let anyStop = false;
+  let anyStop = false, anyElec = false;
   Panes.list.forEach((p, i) => {
     usePane(i);
     if (App.flight) {
@@ -5042,6 +5743,7 @@ function framePanes() {
     if (!Tool.kind) paneRead(p, '');
     else if (Tool.kind === 'heat') paneRead(p, '<span class="val">' + esc(heatReading(App.s, Tool.tempC)) + '</span>');
     if (Tool.kind === 'press' && Tool.press.stop) anyStop = true;
+    if (Tool.kind === 'circuit' && Tool.elec) anyElec = true;
     for (const q of Panes.list) q.app.scene.visible = q === p;
     App.scene.visible = true;
     applyCamera();
@@ -5051,7 +5753,7 @@ function framePanes() {
   });
   for (const q of Panes.list) q.app.scene.visible = true;
   App.scene.visible = true;
-  Panes.anyStop = anyStop;
+  Panes.anyStop = anyStop; Panes.anyElec = anyElec;
   if (Tool.kind) updateToolCtl();
   const m = document.getElementById('animMeter');
   if (m && J.mode === 'trends' && Tool.kind === 'heat') meterHTML(m, 'Temperature', thermometerText(Tool.tempC), null);
@@ -5273,7 +5975,7 @@ const sc = a => a.map(x => x * SCENE_PER_PM);
 function buildAnimObjects() {
   disposeAnimObjects();
   const T = App.T, key = Anim.key;
-  const c = Anim.ctx = animContext(key, App.s, App.lattice, { startC: Anim.startC, rMaxPm: rMaxPm(), ionScale: ION_SIZE_SCALE[App.sizeMode] });
+  const c = Anim.ctx = animContext(key, App.s, App.lattice, { startC: Anim.startC, rMaxPm: rMaxPm(), ionScale: ION_SIZE_SCALE[App.sizeMode], dial: Anim.live && ANIMATIONS[key].kind === 'circuit' });
   const d = c.d * SCENE_PER_PM, root = new T.Group(), o = Anim.objs = { root }, kind = ANIMATIONS[key].kind;
   if (kind === 'press') {
     o.spring = makeSpring(T, c.arrow.maxLen * SCENE_PER_PM, 0.42 * d); root.add(o.spring);
@@ -5317,9 +6019,36 @@ function buildAnimObjects() {
     // Each wire is one clear, copper-tinted tube (R2d) along its round-cornered curve, so its electrons show through.
     const k = c.circuit, wireMat = new T.MeshStandardMaterial({ color: ANIM_COLOUR.wire, transparent: true, opacity: 0.3, roughness: 0.25, metalness: 0.2, depthWrite: false, side: T.DoubleSide });
     for (const w of k.wires) { const tube = new T.Mesh(tubeGeometry(T, w.pts, WIRE_R_PM), wireMat); tube.renderOrder = 6; root.add(tube); }
+    // The electrodes; in the tool, where the model can melt, they are the crucible's two side walls (S8).
     for (const sx of [-1, 1]) {
-      const plate = new T.Mesh(new T.BoxGeometry(k.plateT * SCENE_PER_PM, k.plateH * SCENE_PER_PM, k.plateH * SCENE_PER_PM), solid(T, ANIM_COLOUR.plate, { metalness: 0.7, roughness: 0.35, transparent: true, opacity: 0.55, depthWrite: false }));
-      plate.position.set(sx * k.plateX * SCENE_PER_PM, 0, 0); root.add(plate);
+      const plate = new T.Mesh(new T.BoxGeometry(k.plateT * SCENE_PER_PM, k.plateH * SCENE_PER_PM, (k.plateZ || k.plateH) * SCENE_PER_PM), solid(T, ANIM_COLOUR.plate, { metalness: 0.7, roughness: 0.35, transparent: true, opacity: 0.55, depthWrite: false }));
+      plate.position.set(sx * k.plateX * SCENE_PER_PM, (k.plateY || 0) * SCENE_PER_PM, 0); root.add(plate);
+    }
+    if (c.heater) {   // the tool's dial (S8): a heater under the sample, and the crucible's clear floor, front and back
+      const hz = c.heater, V = c.vessel;
+      o.heater = new T.Mesh(new T.BoxGeometry(hz.w * SCENE_PER_PM, hz.h * SCENE_PER_PM, hz.wz * SCENE_PER_PM), solid(T, ANIM_COLOUR.heater, { emissive: 0xff4a12, emissiveIntensity: 0 }));
+      o.heater.position.set(0, hz.y * SCENE_PER_PM, 0); root.add(o.heater);
+      const glass = new T.MeshStandardMaterial({ color: 0xbfd8f2, transparent: true, opacity: 0.2, roughness: 0.1, depthWrite: false }),
+        edge = new T.LineBasicMaterial({ color: 0xdbe9fb, transparent: true, opacity: 0.55 });
+      const slab = (w, h, dd, x, y, z) => {
+        const g = new T.BoxGeometry(w * SCENE_PER_PM, h * SCENE_PER_PM, dd * SCENE_PER_PM), m = new T.Mesh(g, glass);
+        m.position.set(x * SCENE_PER_PM, y * SCENE_PER_PM, z * SCENE_PER_PM); m.renderOrder = 5;
+        const ln = new T.LineSegments(new T.EdgesGeometry(g), edge); ln.position.copy(m.position);
+        root.add(m, ln);
+      };
+      const zW = V.innerZ + V.wall;
+      slab(2 * V.inner, V.wall, 2 * zW, 0, V.floorY - V.wall / 2, 0);
+      if (V.melts) {
+        const H = V.rim - V.floorY + V.wall, y = (V.floorY - V.wall + V.rim) / 2, xW = 2 * (k.plateX + k.plateT / 2);
+        slab(xW, H, V.wall, 0, y, -(V.innerZ + V.wall / 2)); slab(xW, H, V.wall, 0, y, V.innerZ + V.wall / 2);
+        slab(xW, V.wall, 2 * zW, 0, V.rim + V.wall / 2, 0);   // the clear lid
+        // the liquid (Barry, S8 U1): a clear region from the floor to its surface, with the surface drawn a little
+        // stronger; above it is the gas space. Shown as the melt flows (liquidLevelPm).
+        const lm = new T.MeshStandardMaterial({ color: LIQUID_HEX, transparent: true, opacity: 0, roughness: 0.15, metalness: 0, depthWrite: false, side: T.DoubleSide });
+        o.liquid = new T.Mesh(new T.BoxGeometry(1, 1, 1), lm); o.liquid.renderOrder = 4; o.liquid.visible = false;
+        o.liquidTop = new T.Mesh(new T.PlaneGeometry(1, 1), lm.clone()); o.liquidTop.rotation.x = -Math.PI / 2; o.liquidTop.renderOrder = 4; o.liquidTop.visible = false;
+        root.add(o.liquid, o.liquidTop);
+      }
     }
     const cell = new T.Mesh(new T.BoxGeometry((k.plus[0] - k.minus[0]) * SCENE_PER_PM, 0.7 * d, 0.7 * d), solid(T, ANIM_COLOUR.battery));
     cell.position.set(0, k.Yb * SCENE_PER_PM, 0); root.add(cell);
@@ -5333,10 +6062,31 @@ function buildAnimObjects() {
     o.electrons = new T.InstancedMesh(new T.SphereGeometry(1, 16, 10), new T.MeshBasicMaterial({ color: ELECTRON_GEM.hex, toneMapped: false }), k.nWire);
     o.electrons.instanceMatrix.setUsage(T.DynamicDrawUsage); o.electrons.frustumCulled = false;
     root.add(o.electrons);
+    if (electrolysisReady(c)) {   // a melt of ions (S8 session 3): its molecules' bonds, its bubbles, the electrons crossing at the electrodes
+      const inst = (geo, mat, n) => { const m = new T.InstancedMesh(geo, mat, n); m.instanceMatrix.setUsage(T.DynamicDrawUsage); m.frustumCulled = false; root.add(m); return m; };
+      const nAn = App.lattice.sites.filter(x => x.charge < 0).length, order = electrolysisProducts(App.s).anode.order;
+      o.prodBonds = inst(new T.CylinderGeometry(1, 1, 1, 12), solid(T, STICKS.bondHex, { roughness: 0.5 }), Math.max(1, Math.floor(nAn / 2) * order));
+      o.bubbles = inst(new T.SphereGeometry(1, 28, 18), new T.MeshStandardMaterial({ color: 0xe4f4ff, transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0, depthWrite: false }), 12);
+      o.bubbles.renderOrder = 7;
+      o.sparks = inst(new T.SphereGeometry(1, 16, 10), new T.MeshBasicMaterial({ color: ELECTRON_GEM.hex, toneMapped: false }), 16);
+      // An atom is not its ion (Barry, S8 U1): each element's atoms have a mesh of their own, in the atom's colour, and
+      // each ion carries its charge, written on the side of its sphere that faces the camera.
+      App.atomR = new Float32Array(App.lattice.sites.length);
+      o.atoms = []; o.charges = [];
+      for (const sign of [1, -1]) {
+        const idx = []; App.lattice.sites.forEach((x, i) => { if (Math.sign(x.charge) === sign) idx.push(i); });
+        if (!idx.length) continue;
+        const x0 = App.lattice.sites[idx[0]], m = inst(new T.SphereGeometry(1, 40, 28), gemMaterial(T, App.glass, atomHex(x0.el)), idx.length);
+        m.userData.idx = idx; o.atoms.push(m);
+        const lab = inst(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ map: chargeTexture(T, x0.charge), transparent: true, depthWrite: false, toneMapped: false }), idx.length);
+        lab.userData.idx = idx; lab.renderOrder = 6; o.charges.push(lab);
+      }
+    }
   }
   App.scene.add(root);
 }
 function disposeAnimObjects() {
+  App.atomR = null;
   if (!Anim.objs) return;
   App.scene.remove(Anim.objs.root);
   Anim.objs.root.traverse(x => { if (x.geometry) x.geometry.dispose(); if (x.material) { if (x.material.map) x.material.map.dispose(); x.material.dispose(); } });
@@ -5381,12 +6131,91 @@ function drawAnimation() {
       o.electrons.setMatrixAt(k, v.m);
     });
     o.electrons.instanceMatrix.needsUpdate = true;
-    const lit = liveBulb(c, pose.volts);
+    if (o.bubbles) drawElectrolysis(T, c, o, pose, r);
+    if (o.liquid) drawLiquid(c, o, pose);
+    const lit = liveBulb(c, pose.volts, pose.tempC, pose.elec);
+    if (o.heater) o.heater.material.emissiveIntensity = 1.6 * heaterGlow(pose.tempC);
     o.bulbMat.emissiveIntensity = 3 * lit;
     o.halo.visible = lit > 0; o.halo.material.opacity = 0.35 + 0.65 * lit;
     { const hs = (2.2 + 2.6 * lit) * 2 * c.circuit.bulbR * SCENE_PER_PM; o.halo.scale.set(hs, hs, 1); }
     meterHTML(meter, 'Bulb', bulbWord(lit), null);
   }
+}
+// The electrolysis's own objects (S8 session 3): the molecules' bonds, the bubbles, and each electron as it crosses
+// between an ion and its electrode. Ion centres come from placeIons (App.pos).
+// The melt's clear region and its surface (S8 U1), from liquidLevelPm.
+const LIQUID_HEX = 0xbfe0ff, LIQUID_OPACITY = 0.13, LIQUID_TOP_OPACITY = 0.3;
+function drawLiquid(c, o, pose) {
+  const L = liquidLevelPm(c, pose), V = c.vessel, on = !!L && L.show > 0.01 && L.top > V.floorY;
+  o.liquid.visible = o.liquidTop.visible = on;
+  if (!on) return;
+  const w = 2 * V.inner * SCENE_PER_PM, d = 2 * V.innerZ * SCENE_PER_PM, h = (L.top - V.floorY) * SCENE_PER_PM;
+  o.liquid.scale.set(w, h, d); o.liquid.position.set(0, (V.floorY + L.top) / 2 * SCENE_PER_PM, 0);
+  o.liquidTop.scale.set(w, d, 1); o.liquidTop.position.set(0, L.top * SCENE_PER_PM, 0);
+  o.liquid.material.opacity = LIQUID_OPACITY * L.show; o.liquidTop.material.opacity = LIQUID_TOP_OPACITY * L.show;
+}
+// Each ion's charge on its sphere: a label facing the camera, just in front of the sphere's centre by its radius.
+// Hidden once the ion is an atom. The label is the ion's size, but never less than 0.6 of the largest ion's.
+function drawCharges(T, o) {
+  const v = tmp(T), P = App.pos, cam = App.camera, rOf = new Float32Array(P.length / 3);
+  for (const mesh of App.meshes) { const { idx } = mesh.userData; for (let j = 0; j < idx.length; j++) { mesh.getMatrixAt(j, v.m); rOf[idx[j]] = v.m.elements[0]; } }
+  let rMax = 0; for (const x of rOf) rMax = Math.max(rMax, x);
+  for (const lab of o.charges) {
+    lab.userData.idx.forEach((i, j) => {
+      const r = rOf[i] && Math.max(rOf[i], 0.6 * rMax);   // a small ion's label is still big enough to read
+      v.a.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]); v.d.copy(cam.position).sub(v.a).normalize();
+      v.a.addScaledVector(v.d, r * 1.02); v.s.setScalar(r * 1.15);
+      v.m.compose(v.a, cam.quaternion, v.s); lab.setMatrixAt(j, v.m);
+    });
+    lab.instanceMatrix.needsUpdate = true;
+  }
+}
+// The charge written on an ion: "+", "2+", "−", "2−", white with a dark edge, on a clear square.
+function chargeTexture(T, q) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const g = cv.getContext('2d'), s = (Math.abs(q) === 1 ? '' : Math.abs(q)) + (q > 0 ? '+' : '−');
+  g.font = 'bold ' + (s.length > 1 ? 58 : 76) + 'px -apple-system, Helvetica, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineJoin = 'round'; g.lineWidth = 16; g.strokeStyle = 'rgba(15,15,25,0.95)'; g.strokeText(s, 64, 68); g.fillStyle = '#ffffff'; g.fillText(s, 64, 68);
+  const tx = new T.CanvasTexture(cv); tx.anisotropy = 4; return tx;
+}
+// An atom's colour: its element's colour, ATOM_TINT of the way to white, so an atom is never mistaken for its ion.
+const ATOM_TINT = 0.55;
+function atomHex(el) {
+  return '#' + hexRGB(ELEMENTS[el].hex).map(x => Math.round(255 * (x + ATOM_TINT * (1 - x))).toString(16).padStart(2, '0')).join('');
+}
+function drawElectrolysis(T, c, o, pose, er) {
+  const st = pose.elec, f = pose.elecF, P = App.pos, v = tmp(T), hide = m => { v.m.makeScale(0, 0, 0); for (let k = 0; k < m.count; k++) m.setMatrixAt(k, v.m); m.instanceMatrix.needsUpdate = true; };
+  drawCharges(T, o);
+  if (!st) { hide(o.prodBonds); hide(o.bubbles); hide(o.sparks); o.atoms.forEach(hide); return; }
+  for (const m of o.atoms) {   // the atoms, where placeIons left their ions undrawn
+    m.userData.idx.forEach((i, j) => { const r = App.atomR[i]; v.m.makeScale(r, r, r); if (r) v.m.setPosition(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]); m.setMatrixAt(j, v.m); });
+    m.instanceMatrix.needsUpdate = true;
+  }
+  const at = i => [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]], rb = STICKS.bondR_D * c.d * SCENE_PER_PM;
+  let n = 0;
+  for (const [i, j, order, s] of electrolysisBonds(c, st, f)) {
+    const a = at(i), b = at(j);
+    if (order === 1) { if (n < o.prodBonds.count) o.prodBonds.setMatrixAt(n++, segmentMatrix(T, a, b, rb * s)); continue; }
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], l = Math.hypot(dx, dy, dz) || 1, px = -dy / l, py = dx / l, off = 0.9 * rb;   // a double bond: two sticks side by side
+    for (const sg of [-1, 1]) if (n < o.prodBonds.count) o.prodBonds.setMatrixAt(n++, segmentMatrix(T, [a[0] + sg * px * off, a[1] + sg * py * off, a[2]], [b[0] + sg * px * off, b[1] + sg * py * off, b[2]], 0.7 * rb * s));
+  }
+  v.m.makeScale(0, 0, 0);
+  for (; n < o.prodBonds.count; n++) o.prodBonds.setMatrixAt(n, v.m);
+  o.prodBonds.instanceMatrix.needsUpdate = true;
+  const bub = electrolysisBubbles(c, st, f);
+  for (let k = 0; k < o.bubbles.count; k++) {
+    const b = bub[k], R = b ? b.R * SCENE_PER_PM : 0;
+    v.m.makeScale(R, R, R); if (b) v.m.setPosition(...sc(b.c));
+    o.bubbles.setMatrixAt(k, v.m);
+  }
+  o.bubbles.instanceMatrix.needsUpdate = true;
+  const sp = electrolysisSparks(c, st, f);
+  for (let k = 0; k < o.sparks.count; k++) {
+    const p = sp[k], R = p ? er : 0;
+    v.m.makeScale(R, R, R); if (p) v.m.setPosition(...sc(p));
+    o.sparks.setMatrixAt(k, v.m);
+  }
+  o.sparks.instanceMatrix.needsUpdate = true;
 }
 function meterHTML(el, label, value, frac, scale) {
   const key = label + value;
@@ -5483,7 +6312,7 @@ function onChromeClick(e) {
   else if (b.id === 'toCompare') startCompare([App.s.key]);
   else if (b.id === 'gear') togglePop('gearPop', 'gear');
   else if (b.id === 'why') { togglePop('whyPop', 'why'); showWhy(); }
-  else if (b.id === 'ctlReset') { eachPane(resetPress); levelPanes(); }
+  else if (b.id === 'ctlReset') { eachPane(Tool.kind === 'circuit' ? resetMelt : resetPress); levelPanes(); }
   else if (b.id === 'fold') setFolded(!document.body.classList.contains('folded'));
 }
 // The body keeps its scroll while the same card is redrawn (a word placed,
